@@ -3,6 +3,7 @@ use serde_json::{json, Value};
 use tauri::Emitter;
 use tauri_plugin_autostart::ManagerExt;
 use crate::bridge::call_helper_async;
+use crate::permissions;
 
 // MARK: - Data Types
 
@@ -13,6 +14,7 @@ pub struct AppContext {
     pub window_title: Option<String>,
     pub web_url: Option<String>,
     pub web_domain: Option<String>,
+    pub web_title: Option<String>,
     pub context_before: Option<String>,
     pub context_after: Option<String>,
     pub selected_text: Option<String>,
@@ -24,7 +26,10 @@ pub struct HistoryEntry {
     pub transcript: String,
     pub polished_text: Option<String>,
     pub app_name: Option<String>,
+    pub window_title: Option<String>,
+    pub web_url: Option<String>,
     pub web_domain: Option<String>,
+    pub web_title: Option<String>,
     pub asr_engine: String,
     pub created_at: String,
 }
@@ -92,7 +97,10 @@ pub async fn stop_recording() -> Result<RecordingResult, String> {
         "transcript": transcript,
         "polished_text": polished,
         "app_name": ctx.as_ref().and_then(|c| c["app_name"].as_str()),
+        "window_title": ctx.as_ref().and_then(|c| c["window_title"].as_str()),
+        "web_url": ctx.as_ref().and_then(|c| c["web_url"].as_str()),
         "web_domain": ctx.as_ref().and_then(|c| c["web_domain"].as_str()),
+        "web_title": ctx.as_ref().and_then(|c| c["web_title"].as_str()),
         "asr_engine": engine,
         "duration": duration
     })).await;
@@ -154,4 +162,63 @@ pub async fn set_setting(app: tauri::AppHandle, key: String, value: String) -> R
 pub async fn get_microphones() -> Result<Vec<AudioDevice>, String> {
     let result = call_helper_async("get_microphones", json!({})).await?;
     parse(result)
+}
+
+// MARK: - v0.3.0 Permission Commands
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PermissionStatusResponse {
+    pub microphone: String,
+    pub accessibility: bool,
+    pub input_monitoring: bool,
+}
+
+/// 一次性查詢所有權限狀態
+/// microphone 狀態透過 Swift helper 取得（AVFoundation TCC 需在帶有 UI 的進程中讀取）
+#[tauri::command]
+pub async fn check_permissions() -> Result<PermissionStatusResponse, String> {
+    // 麥克風：透過 helper 查詢（需在 AVFoundation 進程中）
+    let mic_status = call_helper_async("check_microphone_permission", json!({}))
+        .await
+        .map(|v| v.as_str().unwrap_or("unknown").to_string())
+        .unwrap_or_else(|_| "not_determined".to_string());
+
+    // Accessibility 和 Input Monitoring：在 Rust 端直接查詢
+    let accessibility = permissions::check_accessibility();
+    let input_monitoring = permissions::check_input_monitoring();
+
+    Ok(PermissionStatusResponse {
+        microphone: mic_status,
+        accessibility,
+        input_monitoring,
+    })
+}
+
+/// 開啟系統設定對應的權限頁面
+#[tauri::command]
+pub fn open_system_preferences(pane: String) -> Result<(), String> {
+    permissions::open_system_preferences(&pane)
+}
+
+/// 請求麥克風權限（觸發系統對話框）
+/// 若用戶已決定（authorized/denied），此呼叫不會再次彈窗
+#[tauri::command]
+pub async fn request_microphone() -> Result<String, String> {
+    call_helper_async("request_microphone", json!({}))
+        .await
+        .map(|v| v.as_str().unwrap_or("denied").to_string())
+}
+
+/// 取得個人詞典
+#[tauri::command]
+pub async fn get_dictionary() -> Result<Vec<String>, String> {
+    let result = call_helper_async("get_dictionary", json!({})).await?;
+    parse(result)
+}
+
+/// 設定個人詞典
+#[tauri::command]
+pub async fn set_dictionary(words: Vec<String>) -> Result<(), String> {
+    call_helper_async("set_dictionary", json!({ "words": words })).await?;
+    Ok(())
 }

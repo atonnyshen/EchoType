@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/schema.json",
   "productName": "EchoType",
-  "version": "0.1.0",
+  "version": "0.2.1",
   "identifier": "com.echotype.desktop",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -23,7 +23,7 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' https://api.groq.com https://api.openai.com https://api.anthropic.com; media-src 'self'"
     },
     "trayIcon": {
       "iconPath": "icons/icon.png",

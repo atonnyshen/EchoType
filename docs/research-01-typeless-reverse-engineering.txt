@@ -1,0 +1,323 @@
+================================================================================
+EchoType v0.2.0 研究報告 #1 — Typeless 逆向工程
+日期: 2026-02-19
+================================================================================
+
+一、Typeless 基本資訊
+================================================================================
+
+產品名稱: Typeless: AI Voice Dictation
+網站: typeless.com
+公司: Simply CA LLC (加州)
+創辦人: Huang Song (Stanford 校友)
+加速器: StartX (Stanford 旗下)
+iOS App ID: 6749257650
+iOS Bundle ID: com.typeless.mobile
+iOS 評分: 4.68/5 (130 ratings)
+iOS 發布: 2025-12-21
+iOS 版本: 1.1.0 (更新於 2026-02-18)
+iOS 大小: ~54 MB
+聯絡: hello@typeless.com
+Product Hunt: #1 Product of the Day (桌面版和行動版都拿到)
+
+注意: typeless.ch 是完全不同的瑞士醫療 AI 公司，與此產品無關。
+
+定價:
+- Free: $0/月, 4000 字/週, 基本功能
+- Pro: $12/月 (年付) 或 $30/月 (月付), 無限字數
+- 30 天免費試用 Pro
+
+二、macOS App 技術架構 (逆向分析)
+================================================================================
+
+2.1 App Bundle 結構
+-------------------
+路徑: /Applications/Typeless.app
+Bundle ID: now.typeless.desktop
+版本: 1.0.2
+框架: **Electron** (非 Tauri, 非原生)
+  - 證據: ElectronAsarIntegrity, AtomApplication 在 Info.plist 中
+  - Xcode 15.4 編譯, macOS SDK 14.5
+  - asar 封裝的前端代碼
+
+Entitlements:
+  - com.apple.security.cs.allow-jit
+  - com.apple.security.device.audio-input
+  - com.apple.security.network.client
+
+Info.plist 權限聲明:
+  - NSMicrophoneUsageDescription
+  - NSScreenCaptureUsageDescription
+
+2.2 原生 Swift Dylib (5 個)
+----------------------------
+Typeless 使用 koffi (Node.js FFI 庫) 從 Electron 呼叫原生 Swift dylib。
+
+路徑: /Applications/Typeless.app/Contents/Resources/lib/
+
+(1) libKeyboardHelper.dylib (422KB)
+    - KeyboardMonitor.startMonitor(callback:) — CGEventTap 監聽
+    - KeyboardMonitor.stopMonitor()
+    - KeyboardMonitor.processEvents()
+    - KeyboardMonitor.setWatcherInterval(Double)
+    - ShortcutDetector.handleKeyDown(keyCode:)
+    - ShortcutDetector.handleKeyUp(keyCode:)
+    - ShortcutDetector.isShortcutMatch()
+    - ShortcutDetector.keyPressedTimes: [Int32: Double] — 追蹤按鍵時間戳
+    - ShortcutDetector.targetShortcuts: [Set<String>]
+    - ShortcutDetector.pressingKeycodes: [Int32]
+    - 使用 Carbon, CoreGraphics, CoreFoundation frameworks
+
+(2) libInputHelper.dylib (335KB)
+    - insertText(const char*)
+    - insertRichText(const char* html, const char* text)
+    - deleteBackward(int32_t count)
+    - getSelectedText() -> str
+    - getCurrentInputState() -> str
+    - savePasteboard() -> [ArchivedPasteboardItem]
+    - restorePasteboard(from:)
+    - simulatePasteCommand(completion:)
+    - performTextInsertion(with:)
+    - getSelectedTextBySimulateCopyAsync(callback:)
+
+(3) libContextHelper.dylib (364KB)
+    - getFocusedAppInfo() -> str
+    - getFocusedElementInfo() -> str
+    - getFocusedVisibleText(Int32, Int32) -> str
+    - getFocusedElementRelatedContent(Int32, Int32, Int32) -> str
+    - setFocusedWindowEnhancedUserInterface() -> Int32
+    - isBrowserApp(String?) -> Bool
+    - collectContentBefore/After(element:targetChars:...)
+    - CollectionDirection enum
+
+(4) libUtilHelper.dylib (524KB)
+    - checkAccessibilityPermission() -> Int32
+    - muteAudio() / unmuteAudio() / isAudioMuted()
+    - getAudioDevicesJSON() -> str
+    - getDeviceId() -> str
+    - deviceIsLidOpen()
+    - launchApplicationByName(str) -> Bool
+    - testAudioLatency(callback:)
+    - testDeviceListLatency(callback:)
+
+(5) macosCheckAccessibility (獨立二進制)
+    - 位於 child-process-helper 目錄
+    - 用於獨立進程檢測 Accessibility 權限
+
+2.3 前端架構 (Electron)
+-----------------------
+視窗:
+  - floating-bar (浮動錄音條)
+  - hub (主頁面)
+  - onboarding (歡迎流程)
+  - sidebar (側邊欄)
+
+依賴:
+  - @floating-ui/react
+  - @sentry/electron (錯誤追蹤)
+  - drizzle-orm + better-sqlite3 (資料庫)
+  - echarts (圖表)
+  - electron-store (設定儲存)
+  - koffi (FFI 呼叫原生 dylib)
+  - node-schedule (排程)
+  - libopusenc (音頻壓縮)
+
+2.4 設定系統 (electron-store)
+-----------------------------
+Store: app-settings
+
+keyboardShortcut: {
+  pushToTalk: "Fn",
+  handlesFreeMode: "Fn+Space",
+  pasteLastTranscript: "LeftCtrl+LeftCmd+V",
+  translationMode: "Fn+LeftShift"
+}
+microphoneDevices: []
+selectedMicrophoneDevice: null
+preferredLanguage: ""
+autoSelectLanguages: false
+selectedLanguages: []
+launchAtSystemStartup: true
+showFlowBarOnDesktop: false
+enableInteractionSoundEffects: true
+enableShowAppInDock: true
+historyDurationSeconds: -1
+enabledMuteBackgroundAudio: true
+enabledOpusCompression: true
+dynamicMicrophoneDegradationEnabled: true
+translationModeTargetLanguageCode: null
+
+2.5 Onboarding 系統
+--------------------
+Store: app-onboarding
+
+step: 0
+setUpStep: 0
+tryItStep: 0
+tryItPlaygroundStep: 0
+isCompleted: false
+onboardingStep: null
+onboardingMaxReachedStep: null
+onboardingIsCompleted: false
+pressToStopDictationOnboardingShown: {
+  voice_transcript_release: false,
+  voice_transcript: false,
+  voice_command: false,
+  voice_translation: false
+}
+
+啟動邏輯:
+  if (onboardingIsCompleted) {
+    createHubWindow() + createSidebarWindow()
+  } else {
+    createOnboardingWindow()
+  }
+
+2.6 權限處理
+------------
+Accessibility 檢測:
+  - 啟動時: AXIsProcessTrustedWithOptions(false) && startInputListener()
+  - 每 2 秒輪詢: checkAccessibilityPermission()
+  - 狀態變化時: 自動 start/stop InputListener
+  - 雙重檢測: 原生 API + child-process-helper 獨立進程
+  - 如果兩者結果不一致: resetAccessibilityPermission() → app.relaunch()
+
+Microphone 檢測:
+  - check: getMediaAccessStatus("microphone") === "granted"
+  - request: askForMediaAccess("microphone")
+
+2.7 鍵盤監聽
+-------------
+透過 koffi FFI 呼叫 Swift dylib:
+
+const hs = require("koffi");
+const yc = () => path.join(Ot, "keyboard-helper", "build", "libKeyboardHelper.dylib");
+
+綁定函數:
+  libStartMonitor = lib.func("startMonitor", "bool", [koffi.pointer(callback)])
+  libProcessEvents = lib.func("processEvents", "void", [])
+  libStopMonitor = lib.func("stopMonitor", "void", [])
+  libSetWatcherInterval = lib.func("setWatcherInterval", "void", ["double"])
+
+事件廣播到所有視窗。
+
+2.8 文字注入
+-------------
+insertText 和 insertRichText 透過 InputHelper dylib
+注入後有 500ms 延遲:
+
+async insertText(e) {
+  if (!this.isInserting) try {
+    this.isInserting = true;
+    this.libInsertText(e);
+    await new Promise((t) => setTimeout(t, 500));
+  } finally { this.isInserting = false; }
+}
+
+2.9 資料庫 Schema
+-----------------
+使用 drizzle-orm + SQLite
+
+history 表:
+  - id
+  - refined_text
+  - audio (blob)
+  - audio_context
+  - status
+  - duration
+  - app_version
+  - edited_text
+  - languages
+  - mic_device
+  - detected_language
+  - hasRevertedAI
+  - ax_text
+  - ax_html
+  - focused_app_name
+  - focused_app_bundle_id
+  - focused_app_window_title
+  - focused_app_window_web_title
+  - focused_app_window_web_domain
+  - focused_app_window_web_url
+  - mode (default: 'voice_transcript')
+  - mode_meta
+  - client_metadata
+
+三、Typeless 完整功能列表
+================================================================================
+
+3.1 核心語音轉文字
+- AI 語音聽寫: 自然說話，即時輸出潤飾文字
+- 宣稱 4-6x 快於打字 (220 wpm vs 45 wpm)
+- 自動移除填充詞 (um, uh, you know)
+- 自動移除重複
+- 自動編輯: 偵測改口，只保留最終意圖
+- 自動格式化: 口述列表/步驟自動結構化
+- AI 幫助找到更好的措辭
+
+3.2 AI 潤飾/編輯
+- 選取文字 + 語音指令: 縮短、加長、改語氣、生成回覆
+- 選取唯讀文字 + 語音提問: 摘要、解釋、翻譯
+- 快速問答: 搜尋、腦力激盪、開啟頁面
+
+3.3 語言支援
+- 100+ 語言
+- 自動語言偵測
+- 多語言混合聽寫
+- 即時翻譯: 語音翻譯成指定語言
+
+3.4 個人化
+- 個人化風格和語氣: 適應用戶的措辭習慣
+- 個人化進度指標
+- 個人字典: 自動/手動添加名字、術語
+- 每個 App 不同語氣: 工作郵件 vs 聊天
+
+3.5 平台支援
+- macOS (主要)
+- Windows
+- iOS (App Store)
+- Android
+
+3.6 系統整合
+- 支援所有 App: WhatsApp, Slack, Gmail, Chrome, Cursor, LinkedIn, X,
+  Notion, Superhuman, Arc, Google Docs, Evernote, Apple Notes, Substack,
+  Obsidian, Medium, ChatGPT, Claude, Gemini, Perplexity, Discord, Linear,
+  Stack Overflow, Jira, GitHub, Warp, ClickUp, Monday, Trello
+
+3.7 技術特點
+- 雲端 ASR: 使用 OpenAI 等 LLM 提供者
+- 零數據保留: 不儲存/不訓練用戶數據
+- 上下文感知: 讀取當前 App 和相關文字
+- 即時處理，處理完立即丟棄
+
+四、EchoType vs Typeless 差異分析
+================================================================================
+
+| 特性              | EchoType          | Typeless           |
+|-------------------|-------------------|--------------------|
+| 框架              | Tauri v2 (Rust)   | Electron           |
+| ASR               | 本地 (Whisper/Qwen)| 雲端 (OpenAI)      |
+| 隱私              | 完全離線          | 雲端處理+零保留     |
+| 快捷鍵            | F13 (global-shortcut)| fn 鍵 (CGEventTap)|
+| 長按/點按          | 未實作            | 已實作              |
+| 文字注入           | AX API via helper | Swift dylib via FFI |
+| 上下文感知         | 基本              | 完整 (含瀏覽器)     |
+| AI 潤飾           | TODO              | 完整                |
+| 個人化            | 無                | 完整                |
+| 翻譯              | 無                | 即時翻譯            |
+| 多語言            | 基本              | 100+ 語言           |
+| App 大小          | ~15MB (Tauri)     | ~200MB+ (Electron)  |
+
+五、EchoType v0.2.0 應借鑑的重點
+================================================================================
+
+1. fn 鍵作為主要觸發鍵 (pushToTalk + toggle 模式)
+2. 每 2 秒輪詢 Accessibility 權限狀態
+3. 雙重權限檢測 (原生 + 獨立進程)
+4. 文字注入後 500ms 延遲
+5. Onboarding 步驟式流程 (step-based)
+6. 背景音頻靜音功能 (錄音時)
+7. Opus 壓縮 (節省儲存)
+8. 歷史記錄含完整上下文 (app name, bundle id, window title, web url)
+9. 個人字典功能
+10. 每個 App 不同語氣設定

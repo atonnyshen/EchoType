@@ -1,0 +1,306 @@
+================================================================================
+EchoType v0.2.0 研究報告 #4 — 前端架構分析與開源方案推薦
+日期: 2026-02-19
+================================================================================
+
+一、EchoType 現有前端架構
+================================================================================
+
+1.1 路由結構 (App.tsx - HashRouter)
+------------------------------------
+/           → Hub (主頁面 - 歷史記錄 & 統計)
+/settings   → Settings (設定頁面)
+/floating   → FloatingBar (浮動錄音條)
+/onboarding → Onboarding (首次啟動歡迎流程)
+
+1.2 檔案結構
+-------------
+src/
+├── App.tsx                    # 路由入口
+├── main.tsx                   # React DOM 掛載點
+├── index.css                  # 全局設計系統
+└── components/
+    ├── Hub.tsx               # 主頁面（歷史 + 統計）
+    ├── Hub.css
+    ├── Settings.tsx          # 設定頁面
+    ├── FloatingBar.tsx       # 浮動錄音條（核心功能）
+    ├── FloatingBar.css
+    └── Onboarding.tsx        # 4 步驟歡迎流程
+
+1.3 技術棧
+-----------
+核心: react@18.3.1, react-router-dom@6.28.0
+動畫: framer-motion@11.15.0
+圖表: echarts@5.6.0 + echarts-for-react@3.0.2
+構建: vite@6.1.0, typescript@5.7.2
+
+Tauri 插件:
+  @tauri-apps/api@2
+  @tauri-apps/plugin-clipboard-manager@2.3.2
+  @tauri-apps/plugin-global-shortcut@2
+  @tauri-apps/plugin-autostart@2
+  @tauri-apps/plugin-dialog@2
+  @tauri-apps/plugin-notification@2
+  @tauri-apps/plugin-shell@2
+
+1.4 設計系統 (index.css)
+-------------------------
+色彩:
+  --color-bg:         #0d0d0f          (深黑背景)
+  --color-surface:    rgba(255,255,255,0.04)
+  --color-surface-2:  rgba(255,255,255,0.08)
+  --color-border:     rgba(255,255,255,0.08)
+  --color-text:       #e8e8ed          (淺灰文字)
+  --color-text-muted: rgba(232,232,237,0.5)
+  --color-accent:     #6366f1          (Indigo)
+  --color-accent-2:   #8b5cf6          (Violet)
+  --color-success:    #10b981
+  --color-danger:     #ef4444
+  --color-recording:  #f43f5e          (Rose red)
+
+漸層:
+  --gradient-accent:  linear-gradient(135deg, #6366f1, #8b5cf6)
+  --gradient-glow:    radial-gradient(ellipse at center, rgba(99,102,241,0.15), transparent 70%)
+
+玻璃擬態:
+  --glass-bg:     rgba(20, 20, 28, 0.8)
+  --glass-blur:   blur(20px)
+  --glass-border: 1px solid rgba(255,255,255,0.1)
+
+字體: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', sans-serif
+
+1.5 視窗配置 (tauri.conf.json)
+-------------------------------
+主視窗: 960×640, 最小 800×500, 可調整大小
+浮動條: 320×80, 無裝飾, 永遠在最上層, 不可調整大小, 初始隱藏
+
+1.6 Tauri Commands
+-------------------
+| 命令             | 參數              | 返回值           | 用途           |
+|------------------|-------------------|------------------|----------------|
+| start_recording  | 無                | "ok"             | 啟動錄音       |
+| stop_recording   | 無                | RecordingResult  | 停止+ASR+潤飾  |
+| inject_text      | { text: string }  | ()               | 注入文字       |
+| get_history      | { limit?: number }| HistoryEntry[]   | 歷史記錄       |
+| get_settings     | 無                | Record<str,str>  | 取得設定       |
+| set_setting      | { key, value }    | ()               | 保存設定       |
+| get_microphones  | 無                | AudioDevice[]    | 麥克風列表     |
+| get_context      | 無                | AppContext        | 焦點App上下文  |
+
+事件:
+  hotkey-pressed  → 快捷鍵按下
+  hotkey-released → 快捷鍵釋放
+  inject-failed   → 文字注入失敗
+
+1.7 Settings.tsx 設定項目
+--------------------------
+區塊 1: ASR Engine (whisper_turbo / qwen3_asr)
+區塊 2: Microphone (系統預設 + 動態列表)
+區塊 3: AI Polisher Mode (cloud / none) + API Key + API Base URL
+區塊 4: Language (輸入語言 + 輸出語言)
+區塊 5: System Integration (開機自啟)
+區塊 6: Privacy & Storage (歷史記錄保留天數)
+
+問題: 設定頁面內容溢出視窗，需要修復滾動
+
+1.8 Onboarding 4 步驟
+-----------------------
+Step 1: Welcome — 👋 歡迎使用 EchoType
+Step 2: Privacy — 🔒 隱私承諾（本地處理、不上傳）
+Step 3: Permissions — 🔐 權限請求（麥克風 + 輔助使用）[TODO]
+Step 4: Finish — 🎉 設定完成 + 快捷鍵提示
+
+1.9 FloatingBar 狀態機
+-----------------------
+idle → recording → processing → done → idle
+                                    → inject-failed → (複製) → idle
+
+二、開源方案推薦
+================================================================================
+
+2.1 macOS 全域鍵盤監聽
+-----------------------
+
+HotKey (soffes/HotKey)
+  GitHub: https://github.com/soffes/HotKey
+  Stars: ~800
+  說明: Swift macOS 全域快捷鍵庫，Carbon API，輕量 SPM
+  整合: 低 — 但不支援長按/點按區分
+
+KeyboardShortcuts (sindresorhus/KeyboardShortcuts) ★推薦
+  GitHub: https://github.com/sindresorhus/KeyboardShortcuts
+  Stars: ~1800
+  說明: sindresorhus 出品，純 Swift，支援 SwiftUI
+  整合: 低 — SPM 直接用
+
+MASShortcut (shpakovski/MASShortcut)
+  GitHub: https://github.com/shpakovski/MASShortcut
+  Stars: ~3500
+  說明: 老牌快捷鍵庫，含 UI 錄製元件，Obj-C
+  整合: 中 — 需要 Obj-C bridging
+
+Sauce (Clipy/Sauce)
+  GitHub: https://github.com/Clipy/Sauce
+  Stars: ~500
+  說明: 鍵盤佈局感知的按鍵碼轉換庫
+  整合: 低 — 輔助用途
+
+Hammerspoon (Hammerspoon/hammerspoon) [參考用]
+  GitHub: https://github.com/Hammerspoon/hammerspoon
+  Stars: ~12000
+  說明: Lua 腳本 macOS 自動化，eventtap 模組可參考
+  整合: 參考其 CGEventTap 實作
+
+注意: 長按/點按區分沒有現成庫，需自己用 CGEventTap + 計時器實現。
+
+2.2 語音轉文字
+--------------
+
+whisper.cpp (ggerganov/whisper.cpp) ★核心
+  GitHub: https://github.com/ggerganov/whisper.cpp
+  Stars: ~36000+
+  說明: C/C++ Whisper 實現，含 Swift binding + Core ML
+  整合: 中 — 有官方 Swift example
+
+whisper-rs (tazz4843/whisper-rs) ★Rust 整合
+  GitHub: https://github.com/tazz4843/whisper-rs
+  Stars: ~900+
+  說明: whisper.cpp 的 Rust binding，適合 Tauri 後端
+  整合: 中 — 需編譯 whisper.cpp
+
+WhisperKit (argmaxinc/WhisperKit) ★Apple Silicon 最佳
+  GitHub: https://github.com/argmaxinc/WhisperKit
+  Stars: ~3500+
+  說明: Apple 原生 Swift，Core ML，Apple Silicon 深度優化
+  整合: 低 — 純 Swift SPM
+
+silero-vad (snakers4/silero-vad)
+  GitHub: https://github.com/snakers4/silero-vad
+  Stars: ~4000+
+  說明: 語音活動偵測，判斷何時開始/停止錄音
+  整合: 中 — 需要 ONNX Runtime
+
+cpal (RustAudio/cpal) ★Rust 音頻
+  GitHub: https://github.com/RustAudio/cpal
+  Stars: ~2500+
+  說明: Rust 跨平台音頻 I/O，錄音用
+  整合: 低 — Tauri Rust 後端直接用
+
+推薦組合:
+  WhisperKit (Swift 端) 或 whisper-rs (Rust 端)
+  + cpal (音頻錄製)
+  + silero-vad (語音偵測)
+
+2.3 macOS 文字注入
+-------------------
+
+Accessibility API (原生) ★推薦
+  AXUIElementSetAttributeValue 直接設定焦點元素文字值
+  整合: 中 — 需自己封裝
+
+Espanso (espanso/espanso) [參考用]
+  GitHub: https://github.com/espanso/espanso
+  Stars: ~10000
+  說明: Rust 跨平台文字展開器，macOS 用 CGEventTap + 剪貼板注入
+  整合: 參考其 Rust 原始碼
+
+Maccy (p0deje/Maccy) [參考用]
+  GitHub: https://github.com/p0deje/Maccy
+  Stars: ~12000
+  說明: 剪貼板管理器，可參考其貼上邏輯
+  整合: 參考用
+
+推薦策略:
+  短文本 → Accessibility API 直接注入
+  長文本 → 剪貼板 + Cmd+V 模擬
+  Espanso 的 Rust 原始碼是最好的參考
+
+2.4 UI 組件 (React)
+--------------------
+
+shadcn/ui (shadcn/ui) ★最推薦
+  GitHub: https://github.com/shadcn/ui
+  Stars: ~75000+
+  說明: Radix + Tailwind 元件集，複製貼上式使用
+  整合: 低 — 適合設定頁面
+
+driver.js (kamranahmedse/driver.js)
+  GitHub: https://github.com/kamranahmedse/driver.js
+  Stars: ~22000+
+  說明: 輕量級導覽/highlight 庫，框架無關
+  整合: 低 — 適合 onboarding
+
+react-joyride (gilbarbara/react-joyride)
+  GitHub: https://github.com/gilbarbara/react-joyride
+  Stars: ~7000+
+  說明: React onboarding/導覽元件
+  整合: 低
+
+Radix UI (radix-ui/primitives)
+  GitHub: https://github.com/radix-ui/primitives
+  Stars: ~16000+
+  說明: 無樣式 React UI 原語
+  整合: 低
+
+Floating UI (floating-ui/floating-ui)
+  GitHub: https://github.com/floating-ui/floating-ui
+  Stars: ~30000+
+  說明: 浮動定位庫
+  整合: 低
+
+2.5 Tauri 官方插件
+-------------------
+
+所有在 https://github.com/tauri-apps/plugins-workspace monorepo:
+  - tauri-plugin-global-shortcut (基本快捷鍵，不支援長按)
+  - tauri-plugin-autostart (開機自啟)
+  - tauri-plugin-shell (外部命令)
+  - tauri-plugin-store (持久化 key-value 儲存)
+  - tauri-plugin-notification (系統通知)
+  - tauri-plugin-updater (自動更新)
+
+2.6 macOS 上下文感知
+---------------------
+
+不需要第三方庫，原生 API 足夠:
+  - 焦點 App: NSWorkspace.shared.frontmostApplication
+  - 輸入框內容: AXUIElementCopyAttributeValue (Accessibility API)
+  - 瀏覽器 URL: AppleScript/JXA
+    tell application "Google Chrome" to get URL of active tab
+
+三、EchoType 整合建議總結
+================================================================================
+
+最高優先級引入:
+  1. WhisperKit 或 whisper-rs — 語音轉文字核心
+  2. KeyboardShortcuts (sindresorhus) — 全域快捷鍵
+  3. cpal — Rust 端音頻錄製
+  4. shadcn/ui — 設定頁面 UI
+  5. Tauri 官方插件 (store, updater)
+
+參考但不直接引入:
+  - Espanso — 學習 macOS 文字注入策略
+  - Hammerspoon — 學習 CGEventTap 和上下文感知
+
+不需要第三方庫:
+  - 權限管理 — 原生 API 足夠
+  - 上下文感知 — NSWorkspace + Accessibility + AppleScript
+  - 文字注入 — 自己封裝 Accessibility API + 剪貼板方案
+
+四、v0.2.0 待辦事項優先級
+================================================================================
+
+P0 (必須):
+  1. 修復設定頁面滾動溢出問題
+  2. 實作 Onboarding 權限請求流程（麥克風 + Accessibility）
+  3. 實作 fn 鍵長按/點按錄音邏輯 (CGEventTap)
+
+P1 (重要):
+  4. 權限狀態儀表板（設定頁面中）
+  5. 快捷鍵自訂 UI
+  6. 每 2 秒輪詢 Accessibility 權限
+
+P2 (加分):
+  7. 背景音頻靜音（錄音時）
+  8. 自動更新功能 (tauri-plugin-updater)
+  9. 歡迎頁面動畫優化

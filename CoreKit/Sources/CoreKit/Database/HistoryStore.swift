@@ -12,6 +12,7 @@ public struct HistoryEntry: Codable, FetchableRecord, PersistableRecord, Sendabl
     public var windowTitle: String?
     public var webUrl: String?
     public var webDomain: String?
+    public var webTitle: String?
     public var contextBefore: String?
     public var asrEngine: String           // "whisper_turbo" | "qwen3_asr"
     public var audioPath: String?
@@ -31,6 +32,7 @@ public struct HistoryEntry: Codable, FetchableRecord, PersistableRecord, Sendabl
         windowTitle: String? = nil,
         webUrl: String? = nil,
         webDomain: String? = nil,
+        webTitle: String? = nil,
         contextBefore: String? = nil,
         asrEngine: String = "whisper_turbo",
         audioPath: String? = nil,
@@ -47,6 +49,7 @@ public struct HistoryEntry: Codable, FetchableRecord, PersistableRecord, Sendabl
         self.windowTitle = windowTitle
         self.webUrl = webUrl
         self.webDomain = webDomain
+        self.webTitle = webTitle
         self.contextBefore = contextBefore
         self.asrEngine = asrEngine
         self.audioPath = audioPath
@@ -92,12 +95,20 @@ public actor HistoryStore {
                 t.column("windowTitle", .text)
                 t.column("webUrl", .text)
                 t.column("webDomain", .text)
+                t.column("webTitle", .text)
                 t.column("contextBefore", .text)
                 t.column("asrEngine", .text).notNull().defaults(to: "whisper_turbo")
                 t.column("audioPath", .text)
                 t.column("durationSeconds", .double).notNull().defaults(to: 0)
                 t.column("createdAt", .datetime).notNull()
                 t.column("mode", .text).notNull().defaults(to: "voice_transcript")
+            }
+
+            // v0.2.1 migration: add webTitle column for existing databases
+            if try db.columns(in: "history").first(where: { $0.name == "webTitle" }) == nil {
+                try db.alter(table: "history") { t in
+                    t.add(column: "webTitle", .text)
+                }
             }
         }
         dbQueue = queue
@@ -159,7 +170,7 @@ public actor HistoryStore {
 
     public func delete(id: String) async throws {
         try await ensureReady()
-        try await dbQueue?.write { db in
+        _ = try await dbQueue?.write { db in
             try HistoryEntry.deleteOne(db, key: id)
         }
     }
@@ -168,7 +179,7 @@ public actor HistoryStore {
     public func pruneOldEntries(days: Int) async throws {
         try await ensureReady()
         let cutoffDate = Calendar.current.date(byAdding: .day, value: -days, to: Date())!
-        try await dbQueue?.write { db in
+        _ = try await dbQueue?.write { db in
             try HistoryEntry
                 .filter(Column("createdAt") < cutoffDate)
                 .deleteAll(db)

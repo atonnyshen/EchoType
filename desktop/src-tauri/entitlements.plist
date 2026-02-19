@@ -2,19 +2,13 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <!-- 麥克風權限 -->
+    <!-- 麥克風權限 (必要：語音錄製) -->
     <key>com.apple.security.device.audio-input</key>
     <true/>
-    <!-- 網路客戶端 -->
+    <!-- 網路客戶端 (必要：AI 潤飾 API 呼叫) -->
     <key>com.apple.security.network.client</key>
     <true/>
-    <!-- JIT (Tauri WebView 需要) -->
-    <key>com.apple.security.cs.allow-jit</key>
-    <true/>
-    <!-- 讀取使用者選取的檔案 -->
-    <key>com.apple.security.files.user-selected.read-write</key>
-    <true/>
-    <!-- 無障礙功能 (AX API) — 需要在 Info.plist 中說明 -->
+    <!-- 無障礙功能 (必要：文字注入與上下文讀取) -->
     <key>com.apple.security.automation.apple-events</key>
     <true/>
 </dict>

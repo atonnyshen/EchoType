@@ -9,7 +9,10 @@ interface HistoryEntry {
   transcript: string;
   polished_text: string | null;
   app_name: string | null;
+  window_title: string | null;
+  web_url: string | null;
   web_domain: string | null;
+  web_title: string | null;
   asr_engine: string;
   created_at: string;
 }
@@ -157,7 +160,20 @@ export default function Hub() {
                         <div className="history-text">{entry.polished_text ?? entry.transcript}</div>
                         <div className="history-meta">
                           <span>{entry.app_name ?? "—"}</span>
-                          {entry.web_domain && <span>· {entry.web_domain}</span>}
+                          {entry.window_title && (
+                            <span title={entry.window_title}>
+                              · {entry.window_title.length > 30 ? entry.window_title.slice(0, 30) + '...' : entry.window_title}
+                            </span>
+                          )}
+                          {entry.web_domain && (
+                            <span>
+                              · {entry.web_url && entry.web_url.startsWith('http') ? (
+                                <a href={entry.web_url} target="_blank" rel="noopener noreferrer" title={entry.web_title ?? undefined} style={{ color: "inherit", textDecoration: "underline" }}>
+                                  {entry.web_domain}
+                                </a>
+                              ) : entry.web_domain}
+                            </span>
+                          )}
                           <span>· {entry.asr_engine === "whisper_turbo" ? "Whisper" : "Qwen3"}</span>
                         </div>
                       </div>

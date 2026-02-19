@@ -1,4 +1,5 @@
 import Foundation
+import AVFoundation
 import CoreKit
 
 // MARK: - JSON IPC Bridge
@@ -39,6 +40,7 @@ func dispatch(cmd: String, args: [String: Any]) async {
             "window_title":   ctx?.windowTitle as Any,
             "web_url":        ctx?.webUrl as Any,
             "web_domain":     ctx?.webDomain as Any,
+            "web_title":      ctx?.webTitle as Any,
             "context_before": ctx?.contextBefore as Any,
             "context_after":  ctx?.contextAfter as Any,
             "selected_text":  ctx?.selectedText as Any
@@ -58,9 +60,18 @@ func dispatch(cmd: String, args: [String: Any]) async {
             return
         }
         do {
+            // 載入個人詞典並加入到 context prompt
+            let dictRaw = await settingsStore.get(.personalDictionary) ?? "[]"
+            let dictWords: [String] = {
+                guard let data = dictRaw.data(using: .utf8),
+                      let arr = try? JSONSerialization.jsonObject(with: data) as? [String] else { return [] }
+                return arr
+            }()
+            let dictPrompt = dictWords.isEmpty ? "" : dictWords.joined(separator: ", ") + ". "
+
             // 取得當前上下文，用於 Whisper initial_prompt
             let ctx = await contextReader.getFocusedContext()
-            let contextPrompt = ctx?.toMinimalPromptContext() ?? ""
+            let contextPrompt = dictPrompt + (ctx?.toMinimalPromptContext() ?? "")
 
             // 傳入 context 作為 Whisper prompt（提升準度）
             let result = try await asrManager.transcribe(audio: wavData, context: contextPrompt)
@@ -102,16 +113,30 @@ func dispatch(cmd: String, args: [String: Any]) async {
         let apiKey   = await settingsStore.get(.apiKey)       ?? ""
         let apiBaseUrl = await settingsStore.get(.apiBaseUrl) ?? "https://api.groq.com/openai/v1/chat/completions"
         let retention = await settingsStore.get(.historyRetentionDays) ?? "30"
+        let hotkey   = await settingsStore.get(.hotkey)       ?? "push_to_talk"
+        let launchAtLogin = await settingsStore.get(.launchAtLogin) ?? "false"
+
+        // Mask API key for security (show first 7 + last 4 only if long enough)
+        let maskedKey: String
+        if apiKey.isEmpty {
+            maskedKey = ""
+        } else if apiKey.count <= 11 {
+            maskedKey = String(repeating: "*", count: apiKey.count)
+        } else {
+            maskedKey = apiKey.prefix(7) + "..." + apiKey.suffix(4)
+        }
+
         respond([
             "asr_engine":      engine,
             "polisher_mode":   polisher,
             "input_language":  inputLang,
             "output_language": outputLang,
             "selected_mic_id": mic,
-            "api_key":         apiKey,
+            "api_key":         maskedKey,
             "api_base_url":    apiBaseUrl,
             "history_retention_days": retention,
-            "launch_at_login": false
+            "hotkey":          hotkey,
+            "launch_at_login": launchAtLogin
         ])
 
     case "set_setting":
@@ -133,6 +158,32 @@ func dispatch(cmd: String, args: [String: Any]) async {
             respondError(error.localizedDescription)
         }
 
+    case "get_dictionary":
+        let raw = await settingsStore.get(.personalDictionary) ?? "[]"
+        if let data = raw.data(using: .utf8),
+           let arr = try? JSONSerialization.jsonObject(with: data) as? [String] {
+            respond(arr)
+        } else {
+            respond([String]())
+        }
+
+    case "set_dictionary":
+        guard let words = args["words"] as? [String] else {
+            respondError("Missing 'words' array")
+            return
+        }
+        do {
+            let json = try JSONSerialization.data(withJSONObject: words)
+            guard let str = String(data: json, encoding: .utf8) else {
+                respondError("Failed to encode dictionary as UTF-8")
+                return
+            }
+            try await settingsStore.set(.personalDictionary, value: str)
+            respond(true)
+        } catch {
+            respondError(error.localizedDescription)
+        }
+
     case "get_history":
         let limit = args["limit"] as? Int ?? 50
         do {
@@ -145,8 +196,11 @@ func dispatch(cmd: String, args: [String: Any]) async {
                     "created_at": ISO8601DateFormatter().string(from: e.createdAt)
                 ]
                 if let p = e.polishedText  { dict["polished_text"] = p }
-                if let a = e.appName      { dict["app_name"]       = a }
-                if let d = e.webDomain    { dict["web_domain"]     = d }
+                if let a = e.appName       { dict["app_name"]      = a }
+                if let w = e.windowTitle   { dict["window_title"]  = w }
+                if let u = e.webUrl        { dict["web_url"]       = u }
+                if let d = e.webDomain     { dict["web_domain"]    = d }
+                if let t = e.webTitle      { dict["web_title"]     = t }
                 return dict
             }
             respond(list)
@@ -163,7 +217,10 @@ func dispatch(cmd: String, args: [String: Any]) async {
             transcript:     transcript,
             polishedText:   args["polished_text"] as? String,
             appName:        args["app_name"]      as? String,
+            windowTitle:    args["window_title"]  as? String,
+            webUrl:         args["web_url"]       as? String,
             webDomain:      args["web_domain"]    as? String,
+            webTitle:       args["web_title"]     as? String,
             asrEngine:      args["asr_engine"]    as? String ?? "whisper_turbo",
             durationSeconds: args["duration"]      as? Double ?? 0
         )
@@ -202,13 +259,13 @@ func dispatch(cmd: String, args: [String: Any]) async {
         do {
             if modelType == "whisper" {
                 let _ = try await modelDownloader.downloadWhisper { progress in
-                    // TODO: 可以透過 emit 回報進度給前端
-                    print("Whisper download progress: \(Int(progress * 100))%")
+                    // Progress logging to stderr to avoid corrupting stdout IPC
+                    fputs("Whisper download progress: \(Int(progress * 100))%\n", stderr)
                 }
                 respond(true)
             } else if modelType == "qwen3" {
                 let _ = try await modelDownloader.downloadQwen3 { progress in
-                    print("Qwen3 download progress: \(Int(progress * 100))%")
+                    fputs("Qwen3 download progress: \(Int(progress * 100))%\n", stderr)
                 }
                 respond(true)
             } else {
@@ -217,6 +274,28 @@ func dispatch(cmd: String, args: [String: Any]) async {
         } catch {
             respondError(error.localizedDescription)
         }
+
+    // MARK: - v0.3.0 Permission Commands
+
+    case "check_microphone_permission":
+        let status = AVCaptureDevice.authorizationStatus(for: .audio)
+        let statusStr: String
+        switch status {
+        case .notDetermined: statusStr = "not_determined"
+        case .authorized:    statusStr = "authorized"
+        case .denied:        statusStr = "denied"
+        case .restricted:    statusStr = "restricted"
+        @unknown default:    statusStr = "unknown"
+        }
+        respond(statusStr)
+
+    case "request_microphone":
+        // 觸發系統麥克風權限對話框（若已決定則不再出現）
+        let granted = await AVCaptureDevice.requestAccess(for: .audio)
+        respond(granted ? "authorized" : "denied")
+
+    case "check_accessibility":
+        respond(AXIsProcessTrusted())
 
     default:
         respondError("Unknown command: \(cmd)")

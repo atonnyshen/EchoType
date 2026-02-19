@@ -48,6 +48,18 @@ export default function FloatingBar() {
     }, 80);
   }, []);
 
+  const handleCancelRecording = useCallback(() => {
+    if (timerRef.current) clearInterval(timerRef.current);
+    if (waveRef.current) clearInterval(waveRef.current);
+    setWaveHeights(Array(12).fill(4));
+    setState("idle");
+
+    // Stop backend recording to prevent AudioManager from staying in recording state
+    invoke("stop_recording").catch(() => {
+      // Ignore errors - recording may not have started yet
+    });
+  }, []);
+
   const handleStopRecording = useCallback(async () => {
     if (stateRef.current !== "recording") return;
     setState("processing");
@@ -90,15 +102,73 @@ export default function FloatingBar() {
     }
   }, [result]);
 
-  // 監聽全域快捷鍵事件
+  // 監聽全域快捷鍵事件（v0.3.0：支援長按 + 點按兩種模式）
   useEffect(() => {
-    const unlisten1 = listen("hotkey-pressed", () => handleStartRecording());
-    const unlisten2 = listen("hotkey-released", () => handleStopRecording());
+    const listeners: Promise<() => void>[] = [];
+
+    // 長按模式：fn 按住 > 300ms → 開始錄音
+    listeners.push(
+      listen("hotkey-pressed", () => {
+        if (stateRef.current === "idle") {
+          handleStartRecording();
+        }
+      })
+    );
+
+    // 長按模式：fn 放開 → 停止錄音
+    listeners.push(
+      listen("hotkey-released", () => {
+        if (stateRef.current === "recording") {
+          handleStopRecording();
+        }
+      })
+    );
+
+    // 點按模式：fn 短按 < 300ms → toggle 錄音
+    listeners.push(
+      listen("hotkey-tap", () => {
+        if (stateRef.current === "idle") {
+          handleStartRecording();
+        } else if (stateRef.current === "recording") {
+          handleStopRecording();
+        }
+      })
+    );
+
+    // 錄音太短（300ms~500ms 之間放開）→ 取消，顯示提示
+    listeners.push(
+      listen("hotkey-cancelled", () => {
+        if (stateRef.current === "recording") {
+          handleCancelRecording();
+          new Audio("/sounds/Basso.aiff").play().catch(console.error);
+        }
+      })
+    );
+
+    // Ctrl+Cmd+V → 貼上最後一次轉錄
+    listeners.push(
+      listen("paste-last-transcript", async () => {
+        if (stateRef.current !== "idle") return;
+        try {
+          const history = await invoke<any[]>("get_history", { limit: 1 });
+          if (history.length > 0) {
+            const text = history[0].polished_text ?? history[0].transcript;
+            await invoke("inject_text", { text });
+          } else {
+            // 無歷史記錄，播放提示音
+            new Audio("/sounds/Basso.aiff").play().catch(console.error);
+          }
+        } catch (e) {
+          console.error("Paste last transcript failed:", e);
+        }
+      })
+    );
+
     return () => {
-      unlisten1.then(f => f());
-      unlisten2.then(f => f());
+      listeners.forEach((p) => p.then((f) => f()));
     };
-  }, [handleStartRecording, handleStopRecording]);
+  }, [handleStartRecording, handleStopRecording, handleCancelRecording]);
+
 
   // 監聽注入失敗事件
   useEffect(() => {
@@ -109,6 +179,14 @@ export default function FloatingBar() {
       unlisten.then(f => f());
     };
   }, []);
+
+  const truncateText = (text: string, maxLength: number): string => {
+    if (text.length <= maxLength) return text;
+    // Use Array.from to handle Unicode properly (including emoji and multi-byte chars)
+    const chars = Array.from(text);
+    if (chars.length <= maxLength) return text;
+    return chars.slice(0, maxLength).join('') + '…';
+  };
 
   const formatDuration = (s: number) =>
     `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
@@ -180,7 +258,7 @@ export default function FloatingBar() {
             exit={{ opacity: 0, y: -10 }}
           >
             <span className="done-icon">✓</span>
-            <span className="done-text">{result.polished_text.slice(0, 40)}…</span>
+            <span className="done-text">{truncateText(result.polished_text, 40)}</span>
           </motion.div>
         )}
 
@@ -193,7 +271,7 @@ export default function FloatingBar() {
             exit={{ opacity: 0, y: -10 }}
           >
             <span className="warning-icon">⚠️</span>
-            <span className="done-text">{result.polished_text.slice(0, 30)}…</span>
+            <span className="done-text">{truncateText(result.polished_text, 30)}</span>
             <button className="btn btn-primary copy-btn" onClick={handleCopyToClipboard}>
               複製
             </button>

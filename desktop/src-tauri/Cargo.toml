@@ -1,6 +1,6 @@
 [package]
 name = "echotype"
-version = "0.1.0"
+version = "0.2.1"
 description = "EchoType — AI voice-to-text with context awareness"
 authors = ["EchoType"]
 license = "MIT"
@@ -19,12 +19,17 @@ tauri = { version = "2", features = ["tray-icon", "image-ico", "image-png"] }
 tauri-plugin-shell = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-notification = "2"
-tauri-plugin-global-shortcut = "2"
+# v0.3.0: 移除 tauri-plugin-global-shortcut，改用 CGEventTap 直接監聽 fn 鍵
 tauri-plugin-autostart = "2"
 tauri-plugin-clipboard-manager = "2"
+tauri-plugin-updater = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["rt", "macros"] }
+# v0.3.0: CGEventTap FFI 所需（macOS Core Frameworks）
+core-graphics = "0.24"
+core-foundation = "0.10"
+
 
 [profile.release]
 panic = "abort"

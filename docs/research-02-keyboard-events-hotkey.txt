@@ -1,0 +1,427 @@
+================================================================================
+EchoType v0.2.0 研究報告 #2 — macOS 鍵盤事件與快捷鍵實作
+日期: 2026-02-19
+================================================================================
+
+一、macOS 鍵盤事件系統
+================================================================================
+
+1.1 CGEvent vs NSEvent
+----------------------
+
+macOS 有兩層鍵盤事件 API：
+
+CGEvent (Core Graphics, C-level):
+  - 最底層的 userspace 鍵盤事件 API
+  - 事件類型：kCGEventKeyDown (10), kCGEventKeyUp (11), kCGEventFlagsChanged (12)
+  - kCGEventFlagsChanged 是關鍵 — modifier 鍵不會產生 keyDown/keyUp，只產生 flagsChanged
+  - 每個 CGEvent 帶有 CGEventTimestamp（mach absolute time, 奈秒精度）
+  - 可透過 CGEventTapCreate 建立全域事件攔截
+
+NSEvent (AppKit, Objective-C/Swift level):
+  - 封裝 CGEvent 的高階 API
+  - NSEvent.addGlobalMonitorForEvents(matching:handler:) — 監聽其他 app（只讀）
+  - NSEvent.addLocalMonitorForEvents(matching:handler:) — 監聽自己 app（可修改）
+  - 事件類型：.keyDown, .keyUp, .flagsChanged
+  - NSEvent.timestamp 是 TimeInterval（秒，從系統啟動算起）
+
+1.2 fn / Globe 鍵的特殊性
+--------------------------
+
+這是整個方案中最棘手的部分：
+
+1. fn 鍵不產生 keyDown/keyUp — 它是 modifier key，只觸發 flagsChanged
+2. modifier flag 值：fn 鍵對應 NSEvent.ModifierFlags.function
+   raw value = 0x800000 (即 1 << 23)
+   CGEvent 層面是 kCGEventFlagMaskSecondaryFn = 0x800000
+3. macOS Monterey (12.0) 之後：Apple 將 fn 鍵重新定義為 Globe 鍵（🌐）
+   預設行為變成開啟 Emoji 選擇器或切換輸入法
+4. macOS Ventura (13.0)+：系統偏好設定中可選擇 fn 鍵行為：
+   - "按下 🌐 鍵時" → "更改輸入方式" / "開始聽寫" / "顯示表情符號與符號" / "不做任何動作"
+5. 關鍵問題：當 fn 設定為「開始聽寫」時，系統會攔截雙擊 fn 事件，
+   CGEventTap 可能收不到完整事件。設定為「不做任何動作」時最容易攔截。
+
+1.3 flagsChanged 事件偵測邏輯 (虛擬碼)
+---------------------------------------
+
+fn handle_flags_changed(event: CGEvent) {
+    let flags = event.get_flags();
+    let fn_pressed = flags & 0x800000 != 0;
+
+    if fn_pressed && !self.was_fn_pressed {
+        // fn 鍵剛按下
+        self.fn_press_time = event.timestamp();
+        self.was_fn_pressed = true;
+    } else if !fn_pressed && self.was_fn_pressed {
+        // fn 鍵剛放開
+        let hold_duration = event.timestamp() - self.fn_press_time;
+        self.was_fn_pressed = false;
+        // 根據 hold_duration 判定長按 vs 點按
+    }
+}
+
+二、長按 vs 點按的判定邏輯
+================================================================================
+
+2.1 時間閾值
+------------
+
+| 行為              | 閾值    | 說明                    |
+|-------------------|---------|-------------------------|
+| 點按 (tap)        | < 300ms | 按下到放開的時間        |
+| 長按 (hold)       | >= 300ms| 按住超過閾值            |
+| 雙擊 (double-tap) | < 400ms | 兩次 tap 之間的時間     |
+
+推薦 EchoType 使用的閾值：
+  - 長按閾值：300ms（太短容易誤觸，太長體驗遲鈍）
+  - 長按啟動延遲：按住 300ms 後才開始錄音
+  - 雙擊窗口：400ms
+  - 最短錄音時長：500ms（太短丟棄）
+
+2.2 防誤觸策略
+--------------
+
+1. 長按啟動延遲 (hold threshold)：按住超過 300ms 後才啟動錄音
+2. 最短錄音時長：錄音時長 < 500ms 則丟棄結果
+3. debounce：忽略 50ms 內的重複 flagsChanged 事件
+4. 組合鍵排除：fn + 其他鍵同時按下時不觸發錄音
+
+2.3 狀態機設計
+--------------
+
+                    ┌─────────────────────────────────────┐
+                    │                                     │
+                    ▼                                     │
+              ┌──────────┐   fn down    ┌──────────────┐  │
+              │   IDLE   │────────────→│  PENDING     │  │
+              └──────────┘              │  (等待判定)   │  │
+                    ▲                   └──────┬───────┘  │
+                    │                          │          │
+                    │              ┌───────────┼──────────┤
+                    │              │           │          │
+                    │    fn up     │  300ms    │  fn up   │
+                    │   < 300ms    │  elapsed  │  (取消)  │
+                    │              │           │          │
+                    │              ▼           │          │
+                    │    ┌──────────────┐      │          │
+                    │    │  TAP         │      │          │
+                    │    │  (toggle)    │──────┘          │
+                    │    └──────────────┘                  │
+                    │                                     │
+                    │         300ms timer fires            │
+                    │              │                       │
+                    │              ▼                       │
+                    │    ┌──────────────┐                  │
+                    │    │  HOLDING     │                  │
+                    │    │  (錄音中)    │                  │
+                    │    └──────┬───────┘                  │
+                    │           │                          │
+                    │      fn up                           │
+                    │           │                          │
+                    │           ▼                          │
+                    │    ┌──────────────┐                  │
+                    └────│  RELEASED    │──────────────────┘
+                         │  (停止錄音)  │
+                         └──────────────┘
+
+兩種錄音模式：
+  - 長按模式 (push-to-talk)：按住 fn > 300ms → 開始錄音 → 放開 → 停止並轉文字
+  - 點按模式 (toggle)：短按 fn < 300ms → 開始錄音 → 再短按 → 停止並轉文字
+
+三、全域鍵盤監聽技術方案比較
+================================================================================
+
+3.1 方案 A：CGEventTap（推薦）
+------------------------------
+
+C API 簽名：
+  CGEventTapRef CGEventTapCreate(
+      CGEventTapLocation      tap,        // kCGSessionEventTap
+      CGEventTapPlacement     place,      // kCGHeadInsertEventTap
+      CGEventTapOptions       options,    // kCGEventTapOptionListenOnly
+      CGEventMask             eventsOfInterest,  // 1 << 12
+      CGEventTapCallBack      callback,
+      void *                  userInfo
+  );
+
+關鍵參數：
+  - tap: kCGSessionEventTap（當前使用者 session）
+  - options: kCGEventTapOptionListenOnly（只監聽不攔截）
+    如需攔截 fn 預設行為，用 kCGEventTapOptionDefault
+  - eventsOfInterest: CGEventMaskBit(kCGEventFlagsChanged) = 1 << 12
+
+權限需求：
+  - Accessibility 權限（系統偏好設定 → 隱私與安全性 → 輔助使用）
+  - macOS 10.15+ ListenOnly 也需要 Accessibility 權限
+
+3.2 方案 B：NSEvent.addGlobalMonitorForEvents
+----------------------------------------------
+
+Swift 實作：
+  NSEvent.addGlobalMonitorForEvents(matching: .flagsChanged) { event in
+      let fnPressed = event.modifierFlags.contains(.function)
+  }
+
+限制：
+  - 只能監聽，不能攔截/修改事件
+  - 不能阻止 fn 鍵的預設行為
+  - 同樣需要 Accessibility 權限
+  - 對 EchoType 夠用（只需監聽不需攔截）
+
+3.3 方案 C：IOHIDManager（最底層）
+----------------------------------
+
+  - 直接從 HID 驅動讀取
+  - 可捕獲所有鍵盤事件，包括被系統攔截的
+  - 需要 root 權限或 IOKit entitlement
+  - 過於底層，維護成本高
+  - 不推薦
+
+3.4 方案比較表
+--------------
+
+| 特性       | CGEventTap      | NSEvent Global  | IOHIDManager    |
+|------------|-----------------|-----------------|-----------------|
+| 語言       | C (Rust FFI 友好)| ObjC/Swift     | C (Rust FFI)    |
+| 攔截事件   | 可以            | 不行            | 可以            |
+| fn 鍵支援  | flagsChanged    | flagsChanged    | 原始 HID 事件   |
+| 權限       | Accessibility   | Accessibility   | root/entitlement|
+| 複雜度     | 中              | 低              | 高              |
+| 推薦度     | ★★★ 首選       | ★★ 備選        | ★ 不推薦       |
+
+四、推薦架構：Rust 端直接 CGEventTap
+================================================================================
+
+4.1 架構圖
+----------
+
+Tauri App
+  ├── keyboard.rs (改造)
+  │     ├── CGEventTap (透過 core-graphics crate 或手動 FFI)
+  │     ├── fn 鍵狀態機
+  │     ├── 長按/點按判定
+  │     └── emit Tauri events (hotkey-pressed, hotkey-released, hotkey-tap)
+  │
+  ├── bridge.rs (不變)
+  │     └── JSON-IPC → EchoTypeHelper
+  │
+  └── 前端 (小改)
+        └── 新增監聽 hotkey-tap 事件
+
+推薦原因：
+  1. 不需要修改現有的 bridge.rs IPC 架構
+  2. 不需要額外的進程
+  3. core-graphics crate 已在 Cargo.lock 中（Tauri 間接依賴）
+  4. 事件處理在 Rust 端完成，延遲最低
+  5. 與現有 keyboard.rs 架構一致
+
+4.2 Cargo.toml 新增依賴
+------------------------
+
+core-graphics = "0.24"
+core-foundation = "0.10"
+
+4.3 Rust 端 keyboard.rs 改造方案
+---------------------------------
+
+use core_graphics::event::*;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+use tauri::{AppHandle, Emitter};
+
+const HOLD_THRESHOLD_MS: u64 = 300;
+const MIN_RECORDING_MS: u64 = 500;
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum FnKeyState {
+    Idle,
+    Pending,    // fn 按下，等待判定
+    Holding,    // 確認長按，錄音中
+    Recording,  // 點按觸發的 toggle 錄音
+}
+
+pub fn start_fn_key_listener(app: AppHandle) {
+    std::thread::spawn(move || {
+        let state = Arc::new(std::sync::Mutex::new(FnKeyState::Idle));
+        let press_time = Arc::new(std::sync::Mutex::new(Instant::now()));
+
+        let mask = CGEventMaskBit(CGEventType::FlagsChanged);
+
+        // 建立 event tap (可能需要手動 FFI)
+        let tap = create_event_tap(mask, move |event_type, event| {
+            let flags = event.get_flags();
+            let fn_down = (flags.bits() & 0x800000) != 0;
+
+            let mut current_state = state.lock().unwrap();
+
+            match (*current_state, fn_down) {
+                (FnKeyState::Idle, true) => {
+                    *press_time.lock().unwrap() = Instant::now();
+                    *current_state = FnKeyState::Pending;
+
+                    // 啟動 300ms 計時器
+                    let app2 = app.clone();
+                    let state2 = state.clone();
+                    std::thread::spawn(move || {
+                        std::thread::sleep(Duration::from_millis(HOLD_THRESHOLD_MS));
+                        let mut s = state2.lock().unwrap();
+                        if *s == FnKeyState::Pending {
+                            *s = FnKeyState::Holding;
+                            let _ = app2.emit("hotkey-pressed", "fn-hold");
+                        }
+                    });
+                }
+
+                (FnKeyState::Pending, false) => {
+                    *current_state = FnKeyState::Idle;
+                    let _ = app.emit("hotkey-tap", "fn-tap");
+                }
+
+                (FnKeyState::Holding, false) => {
+                    *current_state = FnKeyState::Idle;
+                    let elapsed = press_time.lock().unwrap().elapsed();
+                    if elapsed.as_millis() > MIN_RECORDING_MS as u128 {
+                        let _ = app.emit("hotkey-released", "fn-hold");
+                    } else {
+                        let _ = app.emit("hotkey-cancelled", "too-short");
+                    }
+                }
+
+                _ => {}
+            }
+        });
+
+        core_foundation::runloop::CFRunLoop::run_current();
+    });
+}
+
+4.4 手動 CGEventTap FFI（core-graphics crate 封裝不完整時）
+------------------------------------------------------------
+
+use core_foundation::runloop::*;
+use core_foundation::mach_port::*;
+use std::ffi::c_void;
+use std::os::raw::c_uint;
+
+type CGEventRef = *mut c_void;
+type CGEventTapProxy = *mut c_void;
+type CGEventMask = u64;
+type CGEventType = c_uint;
+
+const kCGEventFlagsChanged: CGEventType = 12;
+const kCGSessionEventTap: c_uint = 1;
+const kCGHeadInsertEventTap: c_uint = 0;
+const kCGEventTapOptionListenOnly: c_uint = 1;
+const kCGEventFlagMaskSecondaryFn: u64 = 0x800000;
+
+type CGEventTapCallBack = extern "C" fn(
+    proxy: CGEventTapProxy,
+    event_type: CGEventType,
+    event: CGEventRef,
+    user_info: *mut c_void,
+) -> CGEventRef;
+
+extern "C" {
+    fn CGEventTapCreate(
+        tap: c_uint, place: c_uint, options: c_uint,
+        events_of_interest: CGEventMask,
+        callback: CGEventTapCallBack,
+        user_info: *mut c_void,
+    ) -> CFMachPortRef;
+
+    fn CGEventGetFlags(event: CGEventRef) -> u64;
+    fn CGEventGetTimestamp(event: CGEventRef) -> u64;
+    fn CGEventTapEnable(tap: CFMachPortRef, enable: bool);
+    fn CFMachPortCreateRunLoopSource(
+        allocator: *const c_void, port: CFMachPortRef, order: isize,
+    ) -> CFRunLoopSourceRef;
+}
+
+extern "C" fn event_tap_callback(
+    _proxy: CGEventTapProxy,
+    event_type: CGEventType,
+    event: CGEventRef,
+    user_info: *mut c_void,
+) -> CGEventRef {
+    if event_type == kCGEventFlagsChanged {
+        let flags = unsafe { CGEventGetFlags(event) };
+        let fn_pressed = (flags & kCGEventFlagMaskSecondaryFn) != 0;
+        let sender = unsafe { &*(user_info as *const std::sync::mpsc::Sender<bool>) };
+        let _ = sender.send(fn_pressed);
+    }
+    event
+}
+
+4.5 前端整合（修改 FloatingBar.tsx）
+-------------------------------------
+
+useEffect(() => {
+    const unlisten1 = listen("hotkey-pressed", () => handleStartRecording());
+    const unlisten2 = listen("hotkey-released", () => handleStopRecording());
+    const unlisten3 = listen("hotkey-tap", () => {
+        if (stateRef.current === "idle") {
+            handleStartRecording();
+        } else if (stateRef.current === "recording") {
+            handleStopRecording();
+        }
+    });
+    const unlisten4 = listen("hotkey-cancelled", () => {
+        // 錄音太短，取消，可顯示短暫提示
+    });
+
+    return () => {
+        unlisten1.then(f => f());
+        unlisten2.then(f => f());
+        unlisten3.then(f => f());
+        unlisten4.then(f => f());
+    };
+}, [handleStartRecording, handleStopRecording]);
+
+五、已知的坑和注意事項
+================================================================================
+
+5.1 fn/Globe 鍵的系統衝突
+- macOS 聽寫功能：雙擊 fn 啟動聽寫時系統會攔截事件
+  → 建議 onboarding 引導用戶將 fn 設為「不做任何動作」
+  → 系統設定 → 鍵盤 → 鍵盤快捷鍵 → 功能鍵 → 按下 🌐 鍵時 → 不做任何動作
+
+5.2 CGEventTap 被系統停用
+- callback 處理太慢（超過幾秒）macOS 會自動停用 event tap
+- 需要定期檢查並重新啟用：
+  if !CGEventTapIsEnabled(tap) { CGEventTapEnable(tap, true); }
+
+5.3 沙盒限制
+- App Store 分發的沙盒化 app 無法使用 CGEventTap
+- EchoType 應使用 Developer ID 簽名 + 公證直接分發
+
+5.4 雙擊偵測的延遲問題
+- 雙擊偵測會讓單擊響應延遲 400ms（需等待確認不是雙擊）
+- 如不需要雙擊功能，建議不實作，保持單擊即時響應
+
+5.5 Typeless 的快捷鍵配置參考
+- pushToTalk: "Fn"
+- handlesFreeMode: "Fn+Space"
+- pasteLastTranscript: "LeftCtrl+LeftCmd+V"
+- translationMode: "Fn+LeftShift"
+
+六、權限檢查 Rust 實作
+================================================================================
+
+extern "C" {
+    fn AXIsProcessTrustedWithOptions(options: *const c_void) -> bool;
+}
+
+pub fn check_accessibility_permission(prompt: bool) -> bool {
+    unsafe {
+        if prompt {
+            let key = core_foundation::string::CFString::new("AXTrustedCheckOptionPrompt");
+            let value = core_foundation::boolean::CFBoolean::true_value();
+            let options = core_foundation::dictionary::CFDictionary::from_CFType_pairs(&[
+                (key.as_CFType(), value.as_CFType())
+            ]);
+            AXIsProcessTrustedWithOptions(options.as_concrete_TypeRef() as *const c_void)
+        } else {
+            AXIsProcessTrustedWithOptions(std::ptr::null())
+        }
+    }
+}

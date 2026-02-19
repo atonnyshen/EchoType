@@ -81,25 +81,3 @@ public actor WhisperEngine: @preconcurrency ASREngineProtocol {
         return truncated
     }
 }
-
-// MARK: - Model Downloader
-/// 首次啟動時下載模型
-public struct WhisperModelDownloader {
-    public static let modelURL = URL(string: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin")!
-
-    public static func download(progress: @escaping (Double) -> Void) async throws -> URL {
-        let appSupport = FileManager.default.urls(
-            for: .applicationSupportDirectory, in: .userDomainMask
-        ).first!
-        let modelsDir = appSupport.appendingPathComponent("EchoType/models")
-        try FileManager.default.createDirectory(at: modelsDir, withIntermediateDirectories: true)
-        let destination = modelsDir.appendingPathComponent("ggml-large-v3-turbo.bin")
-        if FileManager.default.fileExists(atPath: destination.path) {
-            return destination
-        }
-        // URLSession download with progress
-        let (localURL, _) = try await URLSession.shared.download(from: modelURL)
-        try FileManager.default.moveItem(at: localURL, to: destination)
-        return destination
-    }
-}

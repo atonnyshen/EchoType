@@ -1,0 +1,286 @@
+================================================================================
+EchoType v0.2.0 研究報告 #3 — macOS 權限引導流程
+日期: 2026-02-19
+================================================================================
+
+一、macOS 權限類型完整分析
+================================================================================
+
+1.1 麥克風權限 (Microphone)
+---------------------------
+Info.plist Key: NSMicrophoneUsageDescription
+TCC 管理，系統自動彈出對話框。
+
+- 觸發: AVCaptureDevice.requestAccess(for: .audio)
+- 狀態: .notDetermined / .authorized / .denied / .restricted
+- 特點: 唯一可由程式碼直接觸發系統對話框的權限
+- 重要: NSMicrophoneUsageDescription 文字會顯示在對話框中
+
+1.2 輔助使用權限 (Accessibility)
+---------------------------------
+系統位置: System Settings > Privacy & Security > Accessibility
+用於文字注入 (CGEventPost / AXUIElement)。
+
+- 行為: 無法由程式碼觸發系統對話框，只能引導用戶手動開啟
+- 檢測 API: AXIsProcessTrusted() 或 AXIsProcessTrustedWithOptions()
+- 特點: 開啟後某些情況需重啟應用
+- 重要: EchoType 文字注入功能的核心權限
+
+1.3 輸入監控權限 (Input Monitoring)
+------------------------------------
+系統位置: System Settings > Privacy & Security > Input Monitoring
+用於全域快捷鍵監聽 (CGEventTap)。
+
+- 行為: 無法程式化觸發，需手動開啟
+- 檢測: 無直接公開 API，透過嘗試建立 event tap 間接判斷
+- 特點: macOS Sonoma+ 更加嚴格
+- 注意: 有 Accessibility 權限時，Input Monitoring 可能自動獲得
+
+1.4 通知權限 (Notifications)
+-----------------------------
+Framework: UserNotifications
+
+- 觸發: UNUserNotificationCenter.requestAuthorization()
+- 狀態: .notDetermined / .authorized / .denied / .provisional
+- 支援 provisional 模式（靜默通知）
+
+1.5 自動啟動 (Login Items)
+---------------------------
+Framework: ServiceManagement (macOS 13+)
+
+- 使用: SMAppService.mainApp.register()
+- 不需要用戶授權對話框
+- 用戶可在 System Settings > General > Login Items 管理
+
+二、權限請求最佳實踐 (Apple HIG)
+================================================================================
+
+2.1 Just-in-Time (JIT) 請求原則
+---------------------------------
+在用戶即將使用需要該權限的功能時才請求。
+
+| 權限             | 請求時機                    | 理由                |
+|------------------|-----------------------------|---------------------|
+| 麥克風           | 首次點擊「開始錄音」        | 上下文最清晰        |
+| Accessibility    | Onboarding 流程中           | 需手動操作，提前引導 |
+| Input Monitoring | 設定全域快捷鍵時            | 與功能直接關聯      |
+| 通知             | 首次完成轉錄後              | 用戶已體驗價值      |
+| 自動啟動         | 設定頁面中                  | 非必要，用戶自決    |
+
+2.2 Pre-Permission Pattern（預請求模式）
+-----------------------------------------
+步驟 1: 顯示應用內說明畫面 (Custom UI)
+  - 解釋為什麼需要這個權限
+  - 展示功能預覽
+  - 提供「繼續」和「稍後再說」按鈕
+
+步驟 2: 用戶點擊「繼續」後觸發系統對話框
+  - 麥克風/通知: 系統自動彈出
+  - Accessibility/Input Monitoring: 引導到系統設定
+
+好處:
+  - 用戶理解原因後授權率顯著提高
+  - 不浪費系統對話框的一次性機會
+
+2.3 權限被拒絕後的處理
+-----------------------
+麥克風被拒:
+  1. 顯示友善提示
+  2. 提供「前往設定」按鈕
+  3. 提供降級體驗（手動文字輸入）
+
+Accessibility 被拒/未開啟:
+  1. 顯示圖文教學（逐步引導）
+  2. 持續輪詢檢測權限狀態（每 2 秒）
+  3. 權限開啟後自動更新 UI
+
+三、系統偏好設定 Deep Links
+================================================================================
+
+macOS 14 (Sonoma) 及以上:
+  麥克風:     x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone
+  輔助使用:   x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility
+  輸入監控:   x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent
+  螢幕錄製:   x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture
+  通知:       x-apple.systempreferences:com.apple.preference.notifications
+  登入項目:   x-apple.systempreferences:com.apple.LoginItems-Settings.extension
+
+Rust 中打開:
+  std::process::Command::new("open")
+      .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
+      .spawn().ok();
+
+四、Rust (Tauri v2) 技術實作
+================================================================================
+
+4.1 權限檢測 Tauri Commands
+-----------------------------
+
+#[tauri::command]
+pub fn check_permissions() -> serde_json::Value {
+    serde_json::json!({
+        "microphone": check_microphone_permission(),
+        "accessibility": check_accessibility_permission(),
+        "inputMonitoring": check_input_monitoring_permission(),
+    })
+}
+
+#[tauri::command]
+pub fn open_system_preferences(pane: String) -> Result<(), String> {
+    let url = match pane.as_str() {
+        "microphone" =>
+            "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone",
+        "accessibility" =>
+            "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",
+        "inputMonitoring" =>
+            "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent",
+        _ => return Err(format!("Unknown pane: {}", pane)),
+    };
+    std::process::Command::new("open").arg(url).spawn()
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+4.2 Accessibility 權限檢測
+---------------------------
+
+extern "C" {
+    fn AXIsProcessTrusted() -> bool;
+    fn AXIsProcessTrustedWithOptions(options: *const c_void) -> bool;
+}
+
+pub fn check_accessibility_permission() -> bool {
+    unsafe { AXIsProcessTrusted() }
+}
+
+pub fn check_accessibility_with_prompt(prompt: bool) -> bool {
+    unsafe {
+        if prompt {
+            let key = CFString::new("AXTrustedCheckOptionPrompt");
+            let value = CFBoolean::true_value();
+            let options = CFDictionary::from_CFType_pairs(&[
+                (key.as_CFType(), value.as_CFType())
+            ]);
+            AXIsProcessTrustedWithOptions(options.as_concrete_TypeRef() as *const _)
+        } else {
+            AXIsProcessTrusted()
+        }
+    }
+}
+
+4.3 Input Monitoring 權限檢測（間接方式）
+------------------------------------------
+
+pub fn check_input_monitoring_permission() -> bool {
+    // 嘗試建立 event tap，失敗表示沒有權限
+    let tap = CGEventTap::new(
+        CGEventTapLocation::Session,
+        CGEventTapPlacement::HeadInsertEventTap,
+        CGEventTapOptions::ListenOnly,
+        vec![CGEventType::KeyDown],
+        |_proxy, _type, _event| { None },
+    );
+    tap.is_ok()
+}
+
+4.4 前端權限管理
+-----------------
+
+// src/lib/permissions.ts
+import { invoke } from '@tauri-apps/api/core';
+
+export interface PermissionStatus {
+  microphone: 'notDetermined' | 'authorized' | 'denied' | 'restricted';
+  accessibility: boolean;
+  inputMonitoring: boolean;
+}
+
+export async function checkAllPermissions(): Promise<PermissionStatus> {
+  return await invoke('check_permissions');
+}
+
+export async function openSystemPreferences(
+  pane: 'microphone' | 'accessibility' | 'inputMonitoring'
+): Promise<void> {
+  await invoke('open_system_preferences', { pane });
+}
+
+// 輪詢權限狀態（用於 Accessibility 等需手動開啟的權限）
+export function pollPermissionStatus(
+  checkFn: () => Promise<boolean>,
+  onGranted: () => void,
+  intervalMs: number = 2000
+): () => void {
+  const timer = setInterval(async () => {
+    const granted = await checkFn();
+    if (granted) { clearInterval(timer); onGranted(); }
+  }, intervalMs);
+  return () => clearInterval(timer);
+}
+
+五、Info.plist 與 Entitlements 設定
+================================================================================
+
+5.1 Info.plist (透過 tauri.conf.json)
+--------------------------------------
+
+{
+  "bundle": {
+    "macOS": {
+      "entitlements": "./entitlements.plist",
+      "infoPlist": {
+        "NSMicrophoneUsageDescription":
+          "EchoType 需要使用麥克風來將您的語音轉換為文字。語音資料僅在本機處理。"
+      }
+    }
+  }
+}
+
+5.2 entitlements.plist
+-----------------------
+
+com.apple.security.device.audio-input: true
+com.apple.security.network.client: true (下載模型用)
+
+注意: 不啟用 App Sandbox，因為 Accessibility API 在 Sandbox 下受限。
+使用 Developer ID 簽名 + 公證直接分發。
+
+六、推薦的分層策略
+================================================================================
+
+Layer 1 — 必要權限 (Onboarding 中請求):
+  ├── 麥克風: 核心功能
+  └── Accessibility: 文字注入
+
+Layer 2 — 功能觸發權限 (使用時請求):
+  ├── Input Monitoring: 設定全域快捷鍵時
+  └── 通知: 首次完成轉錄後
+
+Layer 3 — 可選權限 (設定頁面):
+  └── 自動啟動: 用戶自行開啟
+
+七、降級策略
+================================================================================
+
+| 權限             | 被拒時的降級方案                              |
+|------------------|-----------------------------------------------|
+| 麥克風           | 完全無法語音，顯示明確引導到系統設定          |
+| Accessibility    | 可轉錄但無法自動輸入，提供「複製到剪貼簿」    |
+| Input Monitoring | 無法全域快捷鍵，改用 Menu Bar 或應用內按鈕    |
+| 通知             | 靜默模式，不影響核心功能                      |
+
+八、Typeless 的權限處理參考
+================================================================================
+
+- 啟動時: AXIsProcessTrustedWithOptions(false) && startInputListener()
+- 每 2 秒輪詢 checkAccessibilityPermission()
+- 雙重檢測: 原生 API + child-process-helper 獨立進程
+- 結果不一致時: resetAccessibilityPermission() → app.relaunch()
+- Microphone: getMediaAccessStatus("microphone") === "granted"
+
+九、macOS Sequoia (15) 新限制
+================================================================================
+
+- 每週提醒用戶審查已授權的 Accessibility 應用
+- Input Monitoring 提示更頻繁
+- 建議在應用中清楚說明權限用途，避免用戶撤銷授權

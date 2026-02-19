@@ -14,6 +14,7 @@ public enum SettingsKey: String, Sendable {
     case launchAtLogin      = "launchAtLogin"
     case showInMenuBar      = "showInMenuBar"
     case historyRetentionDays = "historyRetentionDays" // 歷史記錄保留天數
+    case personalDictionary = "personalDictionary"   // JSON array of custom words/terms
 }
 
 // MARK: - Settings Store

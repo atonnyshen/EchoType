@@ -58,15 +58,20 @@ EchoType/
 
 ### Installation
 
-1. Download the latest DMG release
+1. Download the latest DMG from [Releases](https://github.com/atonnyshen/EchoType/releases)
 2. Drag to Applications folder
-3. Grant microphone and accessibility permissions on first launch
+3. Follow the onboarding guide to grant necessary permissions on first launch:
+   - Microphone permission (for voice recording)
+   - Accessibility permission (for text injection and context reading)
+   - Input Monitoring permission (for global hotkey)
 
 ### Usage
 
-1. Press hotkey (default: `Cmd+Shift+Space`) to start recording
-2. Press again to stop after speaking
-3. Text will be automatically injected into the current application
+1. Press **fn (Globe 🌐)** key to start recording
+   - **Push-to-talk mode**: Hold to record, release to stop
+   - **Toggle mode**: Press once to start, press again to stop
+2. After speaking, text will be automatically injected into the current application
+3. If injection fails, a copy button will be displayed automatically
 
 ## ⚙️ Settings
 
@@ -93,16 +98,31 @@ EchoType/
 - ✅ AI polishing uses encrypted HTTPS connection
 - ✅ No user data collection
 
-## 📝 Development Status
+## 📦 Version Information
 
-Currently at **Batch 4.5** stage, completed:
+**Current Version**: v0.2.1
 
-- ✅ Core speech recognition functionality
+### v0.2.1 Updates
+
+- ✅ **Added webTitle field** - Complete web page title recording
+- ✅ **Improved error handling** - Friendly alerts for dictionary save failures
+- ✅ **Empty history feedback** - Sound notification when pasting empty history
+- ✅ **Critical Bug Fixes**
+  - Fixed hotkey_mode settings key mismatch
+  - Fixed launch_at_login always returning false
+  - Fixed missing hotkey field in get_settings
+- ✅ **Code cleanup** - Removed dead code, fixed compiler warnings
+- ✅ **Full test coverage** - All 32 automated tests passing
+
+### Completed Features
+
+- ✅ Core speech recognition (Whisper Turbo / Qwen3-ASR)
 - ✅ AI polishing and multilingual support
-- ✅ History management
+- ✅ History management and search
 - ✅ System integration (launch at login, hotkeys)
 - ✅ Model auto-download mechanism
-- ✅ Context Injection
+- ✅ Context Injection (context awareness)
+- ✅ Permission management and onboarding flow
 
 ## 🛠️ Local Development
 
