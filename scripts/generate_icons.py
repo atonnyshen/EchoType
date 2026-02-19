@@ -65,7 +65,10 @@ def main():
     
     for size, name in icns_sizes:
         out_path = os.path.join(iconset_dir, name)
-        run_command(["sips", "-z", str(size), str(size), "-s", "format", "png", main_icon_path, "--out", out_path])
+        # Use PIL to preserve transparency
+        img = Image.open(main_icon_path).convert('RGBA')
+        img = img.resize((size, size), Image.Resampling.LANCZOS)
+        img.save(out_path, 'PNG')
         
     icns_path = os.path.join(icons_dir, "icon.icns")
     run_command(["iconutil", "-c", "icns", iconset_dir, "-o", icns_path])

@@ -11,9 +11,16 @@ pub fn setup_tray(app: &mut App) -> tauri::Result<()> {
 
     let menu = Menu::with_items(app, &[&show, &settings, &quit])?;
 
-    let _tray = TrayIconBuilder::new()
-        .icon(app.default_window_icon().unwrap().clone())
-        .menu(&menu)
+    let tray_builder = TrayIconBuilder::new().menu(&menu);
+
+    // 嘗試使用 default icon，如果失敗則使用內建 icon
+    let tray_builder = if let Some(icon) = app.default_window_icon() {
+        tray_builder.icon(icon.clone())
+    } else {
+        tray_builder
+    };
+
+    let _tray = tray_builder
         .tooltip("EchoType — 語音輸入助手")
         .on_tray_icon_event(|tray, event| match event {
             TrayIconEvent::Click {
