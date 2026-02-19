@@ -51,6 +51,13 @@
       "signingIdentity": null
     }
   },
-  "plugins": {}
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/atonnyshen/EchoType/releases/latest/download/latest.json"
+      ],
+      "pubkey": ""
+    }
+  }
 
 }
