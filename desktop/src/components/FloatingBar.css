@@ -1,0 +1,125 @@
+.floating-bar-root {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100vh;
+  background: transparent;
+  -webkit-app-region: drag;
+}
+
+.floating-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 18px;
+  border-radius: 999px;
+  background: rgba(20, 20, 28, 0.88);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid rgba(255,255,255,0.10);
+  box-shadow: 0 8px 32px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.04);
+  -webkit-app-region: no-drag;
+  white-space: nowrap;
+}
+
+/* 狀態色彩 */
+.floating-bar.recording { border-color: rgba(244, 63, 94, 0.3); }
+.floating-bar.done      { border-color: rgba(16, 185, 129, 0.3); }
+
+/* 點 */
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+.idle-dot      { background: rgba(255,255,255,0.3); }
+.recording-dot { background: #f43f5e; }
+
+/* 錄音指示器 */
+.record-indicator {
+  position: relative;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.recording-ring {
+  position: absolute;
+  border-radius: 50%;
+  border: 2px solid rgba(244, 63, 94, 0.6);
+  animation: pulse-ring 1.2s ease-out infinite;
+}
+
+/* 波形 */
+.waveform {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 28px;
+}
+.waveform-bar {
+  width: 3px;
+  border-radius: 2px;
+  background: linear-gradient(to top, #6366f1, #8b5cf6);
+  transition: height 0.08s ease;
+}
+
+/* 計時器 */
+.duration {
+  font-size: 13px;
+  font-weight: 500;
+  color: rgba(255,255,255,0.6);
+  font-variant-numeric: tabular-nums;
+  min-width: 38px;
+}
+
+/* 提示文字 */
+.hint-text {
+  font-size: 13px;
+  color: rgba(255,255,255,0.4);
+}
+
+/* 停止按鈕 */
+.stop-btn {
+  padding: 4px 12px;
+  font-size: 12px;
+  color: rgba(244, 63, 94, 0.9);
+  border: 1px solid rgba(244, 63, 94, 0.3);
+}
+.stop-btn:hover {
+  background: rgba(244, 63, 94, 0.15);
+}
+
+/* 處理中 */
+.spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(255,255,255,0.2);
+  border-top-color: #6366f1;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* 完成狀態 */
+.done-icon { color: #10b981; font-size: 16px; }
+.done-text { font-size: 13px; color: rgba(255,255,255,0.8); max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
+
+/* 注入失敗狀態 */
+.floating-bar.inject-failed { border-color: rgba(251, 191, 36, 0.4); }
+.warning-icon { color: #fbbf24; font-size: 16px; }
+.copy-btn {
+  padding: 4px 12px;
+  font-size: 12px;
+  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  color: white;
+  border: none;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.copy-btn:hover {
+  filter: brightness(1.15);
+  transform: translateY(-1px);
+}

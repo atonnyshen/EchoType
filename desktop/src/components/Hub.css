@@ -1,0 +1,22 @@
+.hub-root { display: flex; height: 100vh; overflow: hidden; }
+.hub-sidebar { width: 200px; min-width: 200px; background: rgba(0,0,0,0.3); border-right: 1px solid var(--color-border); display: flex; flex-direction: column; padding: 20px 12px; gap: 4px; }
+.sidebar-logo { display: flex; align-items: center; gap: 10px; padding: 8px 12px 20px; }
+.logo-icon { font-size: 22px; }
+.logo-text { font-size: 16px; font-weight: 700; background: var(--gradient-accent); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+.sidebar-tab { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-radius: var(--radius-md); background: none; border: none; color: var(--color-text-muted); font-family: inherit; font-size: 14px; cursor: pointer; transition: all 0.15s; text-align: left; }
+.sidebar-tab:hover { background: var(--color-surface); color: var(--color-text); }
+.sidebar-tab.active { background: var(--color-surface-2); color: var(--color-text); }
+.sidebar-spacer { flex: 1; }
+.hub-main { flex: 1; overflow-y: auto; display: flex; flex-direction: column; }
+.hub-header { display: flex; align-items: center; gap: 16px; padding: 24px 24px 16px; border-bottom: 1px solid var(--color-border); }
+.hub-header h1 { font-size: 20px; font-weight: 600; flex: 1; }
+.search-input { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-full); color: var(--color-text); padding: 8px 16px; font-family: inherit; font-size: 14px; outline: none; width: 200px; }
+.search-input:focus { border-color: var(--color-accent); }
+.history-list { padding: 16px 24px; display: flex; flex-direction: column; gap: 10px; }
+.history-group-header { font-size: 13px; font-weight: 600; color: var(--color-text-muted); text-transform: uppercase; letter-spacing: 0.05em; margin: 16px 0 8px; padding-left: 4px; }
+.history-item { padding: 14px 16px; cursor: pointer; transition: transform 0.15s; }
+.history-item:hover { transform: translateX(4px); }
+.history-text { font-size: 14px; line-height: 1.6; margin-bottom: 6px; }
+.history-meta { font-size: 12px; color: var(--color-text-muted); display: flex; gap: 6px; }
+.empty-state { text-align: center; padding: 60px; color: var(--color-text-muted); }
+.stats-placeholder { display: flex; align-items: center; justify-content: center; height: 100%; color: var(--color-text-muted); }

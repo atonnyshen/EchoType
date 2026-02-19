@@ -1,0 +1,157 @@
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
+use tauri::Emitter;
+use tauri_plugin_autostart::ManagerExt;
+use crate::bridge::call_helper_async;
+
+// MARK: - Data Types
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct AppContext {
+    pub app_name: Option<String>,
+    pub bundle_id: Option<String>,
+    pub window_title: Option<String>,
+    pub web_url: Option<String>,
+    pub web_domain: Option<String>,
+    pub context_before: Option<String>,
+    pub context_after: Option<String>,
+    pub selected_text: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct HistoryEntry {
+    pub id: String,
+    pub transcript: String,
+    pub polished_text: Option<String>,
+    pub app_name: Option<String>,
+    pub web_domain: Option<String>,
+    pub asr_engine: String,
+    pub created_at: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct RecordingResult {
+    pub transcript: String,
+    pub polished_text: String,
+    pub duration_seconds: f64,
+    pub asr_engine: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct AudioDevice {
+    pub id: String,
+    pub name: String,
+    pub is_default: bool,
+}
+
+// MARK: - Helper: parse Value into typed struct
+
+fn parse<T: for<'de> Deserialize<'de>>(v: Value) -> Result<T, String> {
+    serde_json::from_value(v).map_err(|e| format!("Parse error: {}", e))
+}
+
+// MARK: - Tauri Commands (connected to EchoTypeHelper via bridge)
+
+/// 取得當前焦點 App 的上下文
+#[tauri::command]
+pub async fn get_context() -> Result<AppContext, String> {
+    let result = call_helper_async("get_context", json!({})).await?;
+    parse(result)
+}
+
+/// 開始錄音（在 helper 內啟動 AVAudioEngine）
+#[tauri::command]
+pub async fn start_recording() -> Result<String, String> {
+    let result = call_helper_async("start_recording", json!({})).await?;
+    Ok(result.as_str().unwrap_or("ok").to_string())
+}
+
+/// 停止錄音、ASR 轉錄（whisper.cpp 或 MLX），回傳原始轉錄
+#[tauri::command]
+pub async fn stop_recording() -> Result<RecordingResult, String> {
+    // 1. 停止錄音，取得 transcript
+    let asr_result = call_helper_async("stop_recording", json!({})).await?;
+    let transcript = asr_result["transcript"].as_str().unwrap_or("").to_string();
+    let duration = asr_result["duration"].as_f64().unwrap_or(0.0);
+    let engine = asr_result["asr_engine"].as_str().unwrap_or("whisper_turbo").to_string();
+
+    // 2. 從設定取得潤飾模式
+    let settings = call_helper_async("get_settings", json!({})).await?;
+    let polisher_mode = settings["polisher_mode"].as_str().unwrap_or("none").to_string();
+
+    // 3. 如果選擇本地或雲端潤飾，目前先 passthrough (模型整合在 helper 端 TODO)
+    let polished = if polisher_mode != "none" {
+        transcript.clone() // TODO: hook into LocalPolisher in helper
+    } else {
+        transcript.clone()
+    };
+
+    // 4. 取得上下文並儲存歷史記錄
+    let ctx = call_helper_async("get_context", json!({})).await.ok();
+    let _ = call_helper_async("save_history", json!({
+        "transcript": transcript,
+        "polished_text": polished,
+        "app_name": ctx.as_ref().and_then(|c| c["app_name"].as_str()),
+        "web_domain": ctx.as_ref().and_then(|c| c["web_domain"].as_str()),
+        "asr_engine": engine,
+        "duration": duration
+    })).await;
+
+    Ok(RecordingResult {
+        transcript: transcript.clone(),
+        polished_text: polished,
+        duration_seconds: duration,
+        asr_engine: engine,
+    })
+}
+
+/// 注入文字到焦點 App（AX API → 剪貼簿 fallback）
+#[tauri::command]
+pub async fn inject_text(app: tauri::AppHandle, text: String) -> Result<(), String> {
+    match call_helper_async("inject_text", json!({ "text": text.clone() })).await {
+        Ok(_) => Ok(()),
+        Err(e) => {
+            // 注入失敗，emit 事件給前端，讓使用者手動複製
+            let _ = app.emit("inject-failed", json!({ "text": text }));
+            Err(e)
+        }
+    }
+}
+
+/// 取得歷史記錄（從 SQLite via GRDB）
+#[tauri::command]
+pub async fn get_history(limit: Option<usize>) -> Result<Vec<HistoryEntry>, String> {
+    let result = call_helper_async("get_history", json!({ "limit": limit.unwrap_or(50) })).await?;
+    parse(result)
+}
+
+/// 取得全部設定
+#[tauri::command]
+pub async fn get_settings() -> Result<Value, String> {
+    call_helper_async("get_settings", json!({})).await
+}
+
+/// 儲存單一設定（同步反映到 ASR Manager）
+#[tauri::command]
+pub async fn set_setting(app: tauri::AppHandle, key: String, value: String) -> Result<(), String> {
+    // 特殊處理：launchAtLogin
+    if key == "launchAtLogin" {
+        let enable = value == "true";
+        let autostart = app.autolaunch();
+        if enable {
+            autostart.enable().map_err(|e: tauri_plugin_autostart::Error| e.to_string())?;
+        } else {
+            autostart.disable().map_err(|e: tauri_plugin_autostart::Error| e.to_string())?;
+        }
+    }
+
+    call_helper_async("set_setting", json!({ "key": key, "value": value })).await?;
+    Ok(())
+}
+
+/// 取得麥克風列表
+#[tauri::command]
+pub async fn get_microphones() -> Result<Vec<AudioDevice>, String> {
+    let result = call_helper_async("get_microphones", json!({})).await?;
+    parse(result)
+}

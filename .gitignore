@@ -1,0 +1,24 @@
+# Swift
+CoreKit/.build/
+helper/.build/
+.swiftpm/
+
+# Rust / Tauri
+desktop/src-tauri/target/
+
+# Node
+desktop/node_modules/
+desktop/dist/
+
+# Tauri sidecar binary (built artifact)
+desktop/src-tauri/binaries/
+
+# macOS
+.DS_Store
+*.xcodeproj
+*.xcworkspace
+
+# IDE
+.idea/
+*.swp
+*~

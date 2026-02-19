@@ -1,0 +1,114 @@
+/* ============================================================
+   EchoType Design System — Dark Glass Aesthetic
+   ============================================================ */
+
+/* 使用系統字體堆疊，確保離線可用 (macOS SF Pro / iOS SF) */
+
+:root {
+  /* 色彩系統 */
+  --color-bg:         #0d0d0f;
+  --color-surface:    rgba(255,255,255,0.04);
+  --color-surface-2:  rgba(255,255,255,0.08);
+  --color-border:     rgba(255,255,255,0.08);
+  --color-text:       #e8e8ed;
+  --color-text-muted: rgba(232,232,237,0.5);
+  --color-accent:     #6366f1;       /* Indigo */
+  --color-accent-2:   #8b5cf6;       /* Violet */
+  --color-success:    #10b981;
+  --color-danger:     #ef4444;
+  --color-recording:  #f43f5e;       /* Rose red for recording state */
+
+  /* 漸層 */
+  --gradient-accent:  linear-gradient(135deg, #6366f1, #8b5cf6);
+  --gradient-glow:    radial-gradient(ellipse at center, rgba(99,102,241,0.15) 0%, transparent 70%);
+
+  /* 間距 */
+  --radius-sm:   6px;
+  --radius-md:   12px;
+  --radius-lg:   20px;
+  --radius-full: 9999px;
+
+  /* 玻璃擬態 */
+  --glass-bg:     rgba(20, 20, 28, 0.8);
+  --glass-blur:   blur(20px);
+  --glass-border: 1px solid rgba(255,255,255,0.1);
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body, #root {
+  height: 100%;
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', sans-serif;
+  background: var(--color-bg);
+  color: var(--color-text);
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+/* 捲軸美化 */
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 2px; }
+
+/* 玻璃卡片 */
+.glass-card {
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border: var(--glass-border);
+  border-radius: var(--radius-lg);
+}
+
+/* 錄音動畫 */
+@keyframes pulse-ring {
+  0% { transform: scale(1); opacity: 0.8; }
+  100% { transform: scale(1.6); opacity: 0; }
+}
+
+@keyframes wave {
+  0%, 100% { height: 4px; }
+  50% { height: 20px; }
+}
+
+.recording-ring {
+  position: absolute;
+  border-radius: 50%;
+  border: 2px solid var(--color-recording);
+  animation: pulse-ring 1.2s ease-out infinite;
+}
+
+/* 按鈕基礎 */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border-radius: var(--radius-full);
+  border: none;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  transition: all 0.2s ease;
+}
+
+.btn-primary {
+  background: var(--gradient-accent);
+  color: white;
+}
+
+.btn-primary:hover { filter: brightness(1.1); transform: translateY(-1px); }
+.btn-ghost { background: var(--color-surface); color: var(--color-text); }
+.btn-ghost:hover { background: var(--color-surface-2); }
+
+/* 波形條 */
+.waveform-bar {
+  width: 3px;
+  border-radius: 2px;
+  background: var(--color-accent);
+  animation: wave 0.8s ease-in-out infinite;
+}
