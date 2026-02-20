@@ -1,6 +1,6 @@
 [package]
 name = "echotype"
-version = "0.2.1"
+version = "0.3.0"
 description = "EchoType — AI voice-to-text with context awareness"
 authors = ["EchoType"]
 license = "MIT"
@@ -29,6 +29,7 @@ tokio = { version = "1", features = ["rt", "macros"] }
 # v0.3.0: CGEventTap FFI 所需（macOS Core Frameworks）
 core-graphics = "0.24"
 core-foundation = "0.10"
+libc = "0.2"
 
 
 [profile.release]

@@ -62,17 +62,28 @@ public final class MacOSTextInjector: TextInjectorProtocol {
 
     private func tryAXInsertion(text: String) async -> Bool {
         return await Task.detached(priority: .userInitiated) {
-            guard let frontApp = NSWorkspace.shared.frontmostApplication else { return false }
+            guard let frontApp = NSWorkspace.shared.frontmostApplication else {
+                // H7 修復：添加詳細錯誤日誌
+                print("[TextInjector] AX insertion failed: No frontmost application")
+                return false
+            }
             let appRef = AXUIElementCreateApplication(frontApp.processIdentifier)
             var focusedElement: AnyObject?
-            guard AXUIElementCopyAttributeValue(
+            let copyResult = AXUIElementCopyAttributeValue(
                 appRef, kAXFocusedUIElementAttribute as CFString, &focusedElement
-            ) == .success else { return false }
+            )
+            guard copyResult == .success else {
+                print("[TextInjector] AX insertion failed: No focused element (error: \(copyResult.rawValue))")
+                return false
+            }
 
             let axEl = focusedElement as! AXUIElement
             let result = AXUIElementSetAttributeValue(
                 axEl, kAXSelectedTextAttribute as CFString, text as CFString
             )
+            if result != .success {
+                print("[TextInjector] AX insertion failed: SetAttributeValue error \(result.rawValue)")
+            }
             return result == .success
         }.value
     }
@@ -88,13 +99,13 @@ public final class MacOSTextInjector: TextInjectorProtocol {
     private static let clipboardSerializer = ClipboardSerializer()
 
     private actor ClipboardSerializer {
-        func run(_ block: @Sendable () async throws -> Void) async rethrows {
+        func run(_ block: @MainActor @Sendable () async throws -> Void) async rethrows {
             try await block()
         }
     }
 
     private func clipboardInsertion(text: String) async throws {
-        try await Self.clipboardSerializer.run { [self] in
+        try await Self.clipboardSerializer.run { @MainActor [self] in
             let savedItems = self.savePasteboard()
 
             NSPasteboard.general.clearContents()

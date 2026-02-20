@@ -4,12 +4,16 @@
 pub mod bridge;
 pub mod commands;
 pub mod keyboard;
+pub mod logger;  // L3: 日誌模組
 pub mod permissions; // v0.3.0 新增
 pub mod tray;
 
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // L3: 初始化日誌系統
+    logger::init_logger();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
@@ -44,7 +48,7 @@ pub fn run() {
             // v0.3.0: 啟動 CGEventTap fn 鍵監聽（取代 global-shortcut）
             keyboard::start_fn_key_listener(app.handle().clone());
 
-            // 建立浮動錄音條視窗（初始隱藏）
+            // 建立浮動錄音條視窗（初始隱藏，錄音時由前端控制顯示/隱藏）
             tauri::WebviewWindowBuilder::new(
                 app,
                 "floating-bar",
@@ -55,7 +59,7 @@ pub fn run() {
             .always_on_top(true)
             .resizable(false)
             .skip_taskbar(true)
-            .inner_size(320.0, 80.0)
+            .inner_size(360.0, 72.0)
             .visible(false)
             .build()?;
 

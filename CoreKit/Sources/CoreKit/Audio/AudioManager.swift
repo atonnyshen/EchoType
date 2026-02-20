@@ -15,6 +15,7 @@ public final class AudioManager: ObservableObject {
     private var audioEngine: AVAudioEngine?
     private var inputNode: AVAudioInputNode?
     private nonisolated(unsafe) var recordingBuffer: [Float] = []
+    private let bufferLock = NSLock()  // 保護 recordingBuffer 的鎖
     private var recordingCompletion: ((Data?) -> Void)?
 
     /// Whisper 期望的取樣率
@@ -45,7 +46,10 @@ public final class AudioManager: ObservableObject {
     public func startRecording() async throws {
         guard !isRecording else { return }
         isRecording = true
-        recordingBuffer = []
+
+        // 清空 buffer（使用 nonisolated 同步方法）
+        clearBuffer()
+
         silenceCountdown = 0
 
         let engine = AVAudioEngine()
@@ -102,9 +106,24 @@ public final class AudioManager: ObservableObject {
         audioEngine?.stop()
         audioEngine = nil
 
-        let samples = recordingBuffer
+        let samples = copyBuffer()
 
         return encodeToWAV(samples: samples, sampleRate: Int(targetSampleRate))
+    }
+
+    // MARK: - Thread-safe buffer operations
+
+    private nonisolated func clearBuffer() {
+        bufferLock.lock()
+        recordingBuffer = []
+        bufferLock.unlock()
+    }
+
+    private nonisolated func copyBuffer() -> [Float] {
+        bufferLock.lock()
+        let copy = recordingBuffer
+        bufferLock.unlock()
+        return copy
     }
 
     private nonisolated func processBuffer(_ buffer: AVAudioPCMBuffer) {
@@ -120,12 +139,25 @@ public final class AudioManager: ObservableObject {
         }
         rms = sqrt(rms / Float(frameCount))
 
-        // 音訊執行緒直接寫入 nonisolated(unsafe) buffer
+        // 音訊執行緒寫入 buffer，使用鎖保護
+        bufferLock.lock()
         recordingBuffer.append(contentsOf: samples)
+        bufferLock.unlock()
 
         let level = rms
         Task { @MainActor in
             self.audioLevel = level
+
+            // H6 修復：實現 VAD 靜音檢測
+            if level < self.silenceThreshold {
+                self.silenceCountdown += 1
+                if self.silenceCountdown >= self.silenceFrames && self.isRecording {
+                    // 檢測到持續靜音，自動停止錄音
+                    _ = self.stopRecording()
+                }
+            } else {
+                self.silenceCountdown = 0
+            }
         }
     }
 

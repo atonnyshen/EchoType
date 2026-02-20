@@ -1,17 +1,26 @@
 import Foundation
 
 // MARK: - Model Downloader
-/// 統一管理 ASR 模型下載（Whisper / Qwen3）
+/// 統一管理 ASR 模型下載與快取檢查
+///
+/// 模型儲存策略（遵循 macOS 最佳實踐）：
+/// 1. Whisper (WhisperKit): ~/Library/Caches/huggingface/hub/
+///    - WhisperKit 自動管理下載與快取
+///    - 遵循 HuggingFace 標準路徑
+/// 2. Qwen3 (MLX): ~/Library/Application Support/EchoType/models/
+///    - 手動下載管理
+///    - 應用專屬模型儲存
 public actor ModelDownloader {
     public static let shared = ModelDownloader()
 
     private init() {}
 
     // MARK: - Model URLs
-    private static let whisperURL = URL(string: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin")!
     private static let qwen3URL = URL(string: "https://huggingface.co/Qwen/Qwen3-ASR-0.6B-MLX/resolve/main/model.safetensors")!
 
     // MARK: - Model Paths
+
+    /// 取得應用專屬模型目錄（用於 Qwen3 等非 WhisperKit 模型）
     public static func getModelsDirectory() -> URL {
         let appSupport = FileManager.default.urls(
             for: .applicationSupportDirectory, in: .userDomainMask
@@ -21,8 +30,16 @@ public actor ModelDownloader {
         return modelsDir
     }
 
+    /// Whisper 模型路徑（由 WhisperKit 自動管理）
+    /// 實際路徑：~/Library/Caches/huggingface/hub/models--argmaxinc--whisperkit-coreml/
     public static func whisperModelPath() -> URL {
-        getModelsDirectory().appendingPathComponent("ggml-large-v3-turbo.bin")
+        let cacheDir = FileManager.default.urls(
+            for: .cachesDirectory,
+            in: .userDomainMask
+        ).first!
+
+        return cacheDir
+            .appendingPathComponent("huggingface/hub/models--argmaxinc--whisperkit-coreml")
     }
 
     public static func qwen3ModelPath() -> URL {
@@ -30,27 +47,61 @@ public actor ModelDownloader {
     }
 
     // MARK: - Check Model Existence
-    public func isWhisperDownloaded() -> Bool {
-        FileManager.default.fileExists(atPath: Self.whisperModelPath().path)
+
+    /// 檢查 Whisper 模型是否已下載
+    /// WhisperKit 會在首次使用時自動下載，此方法用於 UI 顯示
+    public func isWhisperDownloaded(variant: String = "large-v3-turbo") -> Bool {
+        return WhisperEngine.isModelDownloaded(variant: variant)
     }
 
     public func isQwen3Downloaded() -> Bool {
         FileManager.default.fileExists(atPath: Self.qwen3ModelPath().path)
     }
 
-    // MARK: - Download with Progress
-    public func downloadWhisper(progress: @escaping @Sendable (Double) -> Void) async throws -> URL {
-        let destination = Self.whisperModelPath()
+    // MARK: - Model Info
 
-        // 如果已存在，直接返回
-        if FileManager.default.fileExists(atPath: destination.path) {
-            progress(1.0)
-            return destination
-        }
+    /// 取得 Whisper 模型資訊
+    public func getWhisperModelInfo(variant: String = "large-v3-turbo") -> ModelInfo {
+        let isDownloaded = isWhisperDownloaded(variant: variant)
+        let path = WhisperEngine.getModelCachePath()
+        let size = WhisperEngine.getModelSize(variant: variant)
 
-        return try await download(from: Self.whisperURL, to: destination, progress: progress)
+        return ModelInfo(
+            name: "Whisper \(variant)",
+            path: path,
+            isDownloaded: isDownloaded,
+            size: size,
+            source: "HuggingFace (argmaxinc/whisperkit-coreml)"
+        )
     }
 
+    /// 取得 Qwen3 模型資訊
+    public func getQwen3ModelInfo() -> ModelInfo {
+        let isDownloaded = isQwen3Downloaded()
+        let path = Self.qwen3ModelPath().path
+
+        var size: String?
+        if isDownloaded {
+            do {
+                let attributes = try FileManager.default.attributesOfItem(atPath: path)
+                if let fileSize = attributes[.size] as? Int64 {
+                    size = ByteCountFormatter.string(fromByteCount: fileSize, countStyle: .file)
+                }
+            } catch {}
+        }
+
+        return ModelInfo(
+            name: "Qwen3-ASR 0.6B",
+            path: path,
+            isDownloaded: isDownloaded,
+            size: size,
+            source: "HuggingFace (Qwen/Qwen3-ASR-0.6B-MLX)"
+        )
+    }
+
+    // MARK: - Download with Progress
+
+    /// 下載 Qwen3 模型（Whisper 由 WhisperKit 自動處理）
     public func downloadQwen3(progress: @escaping @Sendable (Double) -> Void) async throws -> URL {
         let destination = Self.qwen3ModelPath()
 
@@ -81,6 +132,23 @@ public actor ModelDownloader {
 
         progress(1.0)
         return destination
+    }
+}
+
+// MARK: - Model Info
+public struct ModelInfo: Sendable {
+    public let name: String
+    public let path: String
+    public let isDownloaded: Bool
+    public let size: String?
+    public let source: String
+
+    public init(name: String, path: String, isDownloaded: Bool, size: String?, source: String) {
+        self.name = name
+        self.path = path
+        self.isDownloaded = isDownloaded
+        self.size = size
+        self.source = source
     }
 }
 

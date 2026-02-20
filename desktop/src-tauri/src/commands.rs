@@ -76,9 +76,19 @@ pub async fn start_recording() -> Result<String, String> {
 pub async fn stop_recording() -> Result<RecordingResult, String> {
     // 1. 停止錄音，取得 transcript
     let asr_result = call_helper_async("stop_recording", json!({})).await?;
-    let transcript = asr_result["transcript"].as_str().unwrap_or("").to_string();
-    let duration = asr_result["duration"].as_f64().unwrap_or(0.0);
-    let engine = asr_result["asr_engine"].as_str().unwrap_or("whisper_turbo").to_string();
+
+    // H2 修復：統一錯誤處理，避免 unwrap_or 吞掉錯誤
+    let transcript = asr_result["transcript"]
+        .as_str()
+        .ok_or("Missing transcript field")?
+        .to_string();
+    let duration = asr_result["duration"]
+        .as_f64()
+        .ok_or("Missing duration field")?;
+    let engine = asr_result["asr_engine"]
+        .as_str()
+        .ok_or("Missing asr_engine field")?
+        .to_string();
 
     // 2. 從設定取得潤飾模式
     let settings = call_helper_async("get_settings", json!({})).await?;
@@ -91,9 +101,9 @@ pub async fn stop_recording() -> Result<RecordingResult, String> {
         transcript.clone()
     };
 
-    // 4. 取得上下文並儲存歷史記錄
+    // 4. 取得上下文並儲存歷史記錄（非關鍵操作，失敗僅記錄）
     let ctx = call_helper_async("get_context", json!({})).await.ok();
-    let _ = call_helper_async("save_history", json!({
+    if let Err(e) = call_helper_async("save_history", json!({
         "transcript": transcript,
         "polished_text": polished,
         "app_name": ctx.as_ref().and_then(|c| c["app_name"].as_str()),
@@ -103,7 +113,9 @@ pub async fn stop_recording() -> Result<RecordingResult, String> {
         "web_title": ctx.as_ref().and_then(|c| c["web_title"].as_str()),
         "asr_engine": engine,
         "duration": duration
-    })).await;
+    })).await {
+        eprintln!("[commands] Failed to save history: {}", e);
+    }
 
     Ok(RecordingResult {
         transcript: transcript.clone(),
@@ -177,11 +189,14 @@ pub struct PermissionStatusResponse {
 /// microphone 狀態透過 Swift helper 取得（AVFoundation TCC 需在帶有 UI 的進程中讀取）
 #[tauri::command]
 pub async fn check_permissions() -> Result<PermissionStatusResponse, String> {
-    // 麥克風：透過 helper 查詢（需在 AVFoundation 進程中）
+    // H2 修復：麥克風權限查詢失敗應返回錯誤而非默認值
     let mic_status = call_helper_async("check_microphone_permission", json!({}))
         .await
         .map(|v| v.as_str().unwrap_or("unknown").to_string())
-        .unwrap_or_else(|_| "not_determined".to_string());
+        .unwrap_or_else(|e| {
+            eprintln!("[commands] Failed to check microphone permission: {}", e);
+            "error".to_string()
+        });
 
     // Accessibility 和 Input Monitoring：在 Rust 端直接查詢
     let accessibility = permissions::check_accessibility();

@@ -1,12 +1,33 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { usePermissions, openSystemPreferences } from "../lib/permissions";
+import { SettingsKeys } from "../lib/settings"; // L7: 類型安全的設定鍵名
 
 interface AudioDevice {
   id: string;
   name: string;
   is_default: boolean;
+}
+
+// M7 修復：添加防抖 hook
+function useDebounce<T extends (...args: any[]) => any>(
+  callback: T,
+  delay: number
+): T {
+  const timeoutRef = useRef<NodeJS.Timeout>();
+
+  return useCallback(
+    ((...args: Parameters<T>) => {
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+      }
+      timeoutRef.current = setTimeout(() => {
+        callback(...args);
+      }, delay);
+    }) as T,
+    [callback, delay]
+  );
 }
 
 // MARK: - PermissionRow 元件
@@ -83,16 +104,48 @@ export default function Settings() {
     invoke<string[]>("get_dictionary").then(words => setDictionary(words.join('\n'))).catch(console.error);
   }, []);
 
-  const save = (key: string, value: string) =>
-    invoke("set_setting", { key, value });
+  const save = (key: string, value: string) => {
+    // H8 修復：添加錯誤處理和用戶提示
+    invoke("set_setting", { key, value })
+      .catch((error) => {
+        console.error(`Failed to save setting ${key}:`, error);
+        // 顯示錯誤提示（可以用 toast 或 alert）
+        alert(`設定保存失敗: ${error}`);
+      });
+  };
+
+  // M7 修復：使用防抖版本的 save，避免頻繁保存
+  const debouncedSave = useDebounce(save, 500);
 
   const sectionHeaderStyle = {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: 600,
     marginBottom: 12,
     color: "var(--color-text-muted)",
     textTransform: "uppercase" as const,
     letterSpacing: "0.05em",
+  };
+
+  const selectStyle = {
+    background: "var(--color-surface-2)",
+    border: "1px solid var(--color-border)",
+    color: "var(--color-text)",
+    borderRadius: 8,
+    padding: "12px",
+    fontFamily: "inherit",
+    width: "100%",
+    fontSize: 15,
+  };
+
+  const inputStyle = {
+    background: "var(--color-surface-2)",
+    border: "1px solid var(--color-border)",
+    color: "var(--color-text)",
+    borderRadius: 8,
+    padding: "12px",
+    fontFamily: "inherit",
+    width: "100%",
+    fontSize: 14,
   };
 
   return (
@@ -116,7 +169,7 @@ export default function Settings() {
               <select
                 value={asrEngine}
                 onChange={e => { setAsrEngine(e.target.value); save("asrEngine", e.target.value); }}
-                style={{ background: "rgba(0,0,0,0.2)", border: "1px solid var(--color-border)", color: "var(--color-text)", borderRadius: 8, padding: "12px", fontFamily: "inherit", width: "100%", fontSize: 15 }}
+                style={selectStyle}
               >
                 <option value="whisper_turbo">Whisper Turbo (CoreML) — 高精度、蘋果晶片優化</option>
                 <option value="qwen3_asr">Qwen3-ASR 0.6B (MLX) — 輕量、多語言支援</option>
@@ -134,7 +187,7 @@ export default function Settings() {
               <select
                 value={selectedMic}
                 onChange={e => { setSelectedMic(e.target.value); save("selectedMicId", e.target.value); }}
-                style={{ background: "rgba(0,0,0,0.2)", border: "1px solid var(--color-border)", color: "var(--color-text)", borderRadius: 8, padding: "12px", fontFamily: "inherit", width: "100%", fontSize: 15 }}
+                style={selectStyle}
               >
                 <option value="default">系統預設</option>
                 {mics.map(m => (
@@ -151,7 +204,7 @@ export default function Settings() {
               <select
                 value={polisherMode}
                 onChange={e => { setPolisherMode(e.target.value); save("polisherMode", e.target.value); }}
-                style={{ background: "rgba(0,0,0,0.2)", border: "1px solid var(--color-border)", color: "var(--color-text)", borderRadius: 8, padding: "12px", fontFamily: "inherit", width: "100%", fontSize: 15, marginBottom: 16 }}
+                style={{ ...selectStyle, marginBottom: 16 }}
               >
                 <option value="cloud">雲端 AI（推薦：Groq 免費高速）</option>
                 <option value="none">只轉錄，不潤飾</option>
@@ -167,7 +220,7 @@ export default function Settings() {
                       onChange={e => setApiKey(e.target.value)}
                       onBlur={() => save("apiKey", apiKey)}
                       placeholder="sk-..."
-                      style={{ background: "rgba(0,0,0,0.2)", border: "1px solid var(--color-border)", color: "var(--color-text)", borderRadius: 8, padding: "12px", fontFamily: "inherit", width: "100%", fontSize: 14 }}
+                      style={inputStyle}
                     />
                   </div>
                   <div>
@@ -175,16 +228,16 @@ export default function Settings() {
                     <select
                       value={apiBaseUrl}
                       onChange={e => { setApiBaseUrl(e.target.value); save("apiBaseUrl", e.target.value); }}
-                      style={{ background: "rgba(0,0,0,0.2)", border: "1px solid var(--color-border)", color: "var(--color-text)", borderRadius: 8, padding: "12px", fontFamily: "inherit", width: "100%", fontSize: 14 }}
+                      style={inputStyle}
                     >
                       <option value="https://api.groq.com/openai/v1/chat/completions">Groq（推薦：免費、極速）</option>
                       <option value="https://api.openai.com/v1/chat/completions">OpenAI（GPT-4o mini）</option>
                       <option value="https://api.anthropic.com/v1/messages">Anthropic（Claude 3.5 Haiku）</option>
                     </select>
                   </div>
-                  <div style={{ padding: 12, background: "rgba(99, 102, 241, 0.1)", border: "1px solid rgba(99, 102, 241, 0.2)", borderRadius: 6, fontSize: 13, color: "#818cf8", lineHeight: 1.6 }}>
-                    💡 <strong>推薦使用 Groq</strong>：免費額度大、速度極快（&gt;300 tokens/s），相容 OpenAI 格式。<br/>
-                    取得 API Key：<a href="https://console.groq.com" target="_blank" style={{ color: "#a5b4fc", textDecoration: "underline" }}>console.groq.com</a>
+                  <div style={{ padding: 12, background: "var(--color-accent-bg)", border: "1px solid rgba(0,122,255,0.15)", borderRadius: 6, fontSize: 13, color: "var(--color-accent)", lineHeight: 1.6 }}>
+                    推薦使用 Groq：免費額度大、速度極快（&gt;300 tokens/s），相容 OpenAI 格式。<br/>
+                    取得 API Key：<a href="https://console.groq.com" target="_blank" style={{ color: "var(--color-accent)", textDecoration: "underline" }}>console.groq.com</a>
                   </div>
                 </div>
               )}
@@ -200,7 +253,7 @@ export default function Settings() {
               <select
                 value={inputLanguage}
                 onChange={e => { setInputLanguage(e.target.value); save("inputLanguage", e.target.value); }}
-                style={{ background: "rgba(0,0,0,0.2)", border: "1px solid var(--color-border)", color: "var(--color-text)", borderRadius: 8, padding: "12px", fontFamily: "inherit", width: "100%", fontSize: 14 }}
+                style={inputStyle}
               >
                 <optgroup label="🌟 推薦">
                   <option value="auto">自動偵測（推薦）</option>
@@ -232,7 +285,7 @@ export default function Settings() {
               <select
                 value={outputLanguage}
                 onChange={e => { setOutputLanguage(e.target.value); save("outputLanguage", e.target.value); }}
-                style={{ background: "rgba(0,0,0,0.2)", border: "1px solid var(--color-border)", color: "var(--color-text)", borderRadius: 8, padding: "12px", fontFamily: "inherit", width: "100%", fontSize: 14 }}
+                style={inputStyle}
               >
                 <optgroup label="🌟 推薦">
                   <option value="zh-TW">繁體中文（台灣）</option>
@@ -283,7 +336,7 @@ export default function Settings() {
                 placeholder={"例如：\nEchoType\nWhisper Turbo\n台積電"}
                 rows={6}
                 style={{
-                  background: "rgba(0,0,0,0.2)",
+                  background: "var(--color-surface-2)",
                   border: "1px solid var(--color-border)",
                   color: "var(--color-text)",
                   borderRadius: 8,
@@ -310,7 +363,7 @@ export default function Settings() {
                 <select
                   value={hotkeyMode}
                   onChange={e => { setHotkeyMode(e.target.value); save("hotkey", e.target.value); }}
-                  style={{ background: "rgba(0,0,0,0.2)", border: "1px solid var(--color-border)", color: "var(--color-text)", borderRadius: 8, padding: "8px 12px", fontFamily: "inherit", fontSize: 14 }}
+                  style={{ ...inputStyle, padding: "8px 12px" }}
                 >
                   <option value="push_to_talk">長按錄音 — 按住 fn 錄音，放開停止</option>
                   <option value="toggle">點按切換 — 按一下開始，再按一下停止</option>
@@ -421,7 +474,7 @@ export default function Settings() {
                   setHistoryRetention(e.target.value);
                   save("historyRetentionDays", e.target.value);
                 }}
-                style={{ background: "rgba(0,0,0,0.2)", border: "1px solid var(--color-border)", color: "var(--color-text)", borderRadius: 8, padding: "12px", fontFamily: "inherit", width: "100%", fontSize: 15 }}
+                style={selectStyle}
               >
                 <option value="7">保留 7 天</option>
                 <option value="30">保留 30 天</option>

@@ -1,0 +1,40 @@
+[
+  {
+    "timestamp": 1771537254424,
+    "issues": [
+      {
+        "file": "helper/.build/checkouts/WhisperKit/Examples/ServeCLIClient/Python/whisperkit_client.py",
+        "message": "可能的硬編碼 API Key",
+        "ruleId": "hardcoded_api_key",
+        "severity": "error",
+        "line": 25
+      },
+      {
+        "file": "helper/.build/checkouts/WhisperKit/Examples/ServeCLIClient/Python/test_translate.py",
+        "message": "可能的硬編碼 API Key",
+        "ruleId": "hardcoded_api_key",
+        "severity": "error",
+        "line": 109
+      },
+      {
+        "file": "helper/.build/checkouts/WhisperKit/Examples/ServeCLIClient/Python/test_transcribe.py",
+        "message": "可能的硬編碼 API Key",
+        "ruleId": "hardcoded_api_key",
+        "severity": "error",
+        "line": 111
+      },
+      {
+        "file": "desktop/src-tauri/icons/venv/lib/python3.14/site-packages/pip/_internal/network/auth.py",
+        "message": "可能的硬編碼密碼",
+        "ruleId": "hardcoded_password",
+        "severity": "error",
+        "line": 469
+      }
+    ],
+    "summary": {
+      "totalIssues": 4,
+      "todoCount": 143,
+      "durationMs": 697
+    }
+  }
+]

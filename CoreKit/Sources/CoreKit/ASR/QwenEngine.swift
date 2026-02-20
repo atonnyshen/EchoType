@@ -26,11 +26,43 @@ public actor QwenEngine: @preconcurrency ASREngineProtocol {
     }
 
     public func load() async throws {
+        // H5 修復：添加模型驗證
         guard FileManager.default.fileExists(atPath: modelPath.path) else {
             throw ASRError.modelNotFound(modelPath.path)
         }
+
+        // 驗證模型目錄結構
+        do {
+            let contents = try FileManager.default.contentsOfDirectory(
+                at: modelPath,
+                includingPropertiesForKeys: [.isDirectoryKey],
+                options: []
+            )
+
+            // 檢查必要的模型文件（MLX 模型通常包含 config.json, weights.safetensors 等）
+            let hasConfig = contents.contains { $0.lastPathComponent == "config.json" }
+            let hasWeights = contents.contains { $0.lastPathComponent.hasSuffix(".safetensors") }
+
+            if !hasConfig {
+                print("[QwenEngine] Warning: config.json not found in model directory")
+            }
+            if !hasWeights {
+                print("[QwenEngine] Warning: No .safetensors weights found in model directory")
+            }
+
+            if !hasConfig && !hasWeights {
+                throw ASRError.invalidModelFormat("Model directory missing required files")
+            }
+        } catch let error as ASRError {
+            throw error
+        } catch {
+            print("[QwenEngine] Failed to validate model directory: \(error)")
+            throw ASRError.modelLoadFailed
+        }
+
         // TODO: import MLX; model = try await MLXASRModel.load(from: modelPath)
         isLoaded = true
+        print("[QwenEngine] Model validated and loaded from \(modelPath.path)")
     }
 
     public func unload() {

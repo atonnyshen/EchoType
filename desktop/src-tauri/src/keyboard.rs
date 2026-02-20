@@ -12,7 +12,7 @@
 //   4. CGEventTap 被系統停用時自動 re-enable
 
 use std::ffi::c_void;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
@@ -96,6 +96,7 @@ struct FnKeyContext {
     last_event_ms: AtomicU64,
     app_handle: AppHandle,
     tap_ref: Mutex<Option<CFMachPortRef>>,
+    timer_cancelled: AtomicBool,  // 取消標記：防止計時器在 fn 放開後仍觸發
 }
 
 // SAFETY: Manual Send/Sync implementation for FnKeyContext
@@ -160,6 +161,10 @@ extern "C" fn event_tap_callback(
             // 如果在 Pending/Holding 狀態收到任何按鍵，取消錄音
             let mut state = ctx.state.lock().unwrap();
             if *state == FnKeyState::Pending || *state == FnKeyState::Holding {
+                // H1 修復：Pending 狀態也需要設置取消標記
+                if *state == FnKeyState::Pending {
+                    ctx.timer_cancelled.store(true, Ordering::Release);
+                }
                 if *state == FnKeyState::Holding {
                     let _ = ctx.app_handle.emit("hotkey-cancelled", "combo-key");
                 }
@@ -187,6 +192,10 @@ fn process_fn_event(ctx: &Arc<FnKeyContext>, fn_down: bool, flags: u64) {
     // 如果 fn 與其他 modifier 同時按下（Shift/Ctrl/Alt/Cmd），忽略此事件
     if fn_down && (flags & COMBO_MASK) != 0 {
         let mut state = ctx.state.lock().unwrap();
+        // H1 修復：Pending 狀態也需要設置取消標記
+        if *state == FnKeyState::Pending {
+            ctx.timer_cancelled.store(true, Ordering::Release);
+        }
         if *state == FnKeyState::Holding {
             let _ = ctx.app_handle.emit("hotkey-cancelled", "combo-key");
         }
@@ -212,9 +221,19 @@ fn process_fn_event(ctx: &Arc<FnKeyContext>, fn_down: bool, flags: u64) {
         (FnKeyState::Idle, true) => {
             *ctx.press_instant.lock().unwrap() = Instant::now();
             *state = FnKeyState::Pending;
+
+            // 重置取消標記
+            ctx.timer_cancelled.store(false, Ordering::Release);
+
             let ctx_clone = Arc::clone(ctx);
             std::thread::spawn(move || {
                 std::thread::sleep(Duration::from_millis(HOLD_THRESHOLD_MS));
+
+                // 檢查取消標記：如果已取消，直接返回
+                if ctx_clone.timer_cancelled.load(Ordering::Acquire) {
+                    return;
+                }
+
                 let mut s = ctx_clone.state.lock().unwrap();
                 if *s == FnKeyState::Pending {
                     *s = FnKeyState::Holding;
@@ -226,6 +245,8 @@ fn process_fn_event(ctx: &Arc<FnKeyContext>, fn_down: bool, flags: u64) {
 
         // PENDING + fn 放開（< 300ms）→ 點按模式，通知前端 toggle
         (FnKeyState::Pending, false) => {
+            // 設置取消標記，防止計時器線程繼續執行
+            ctx.timer_cancelled.store(true, Ordering::Release);
             *state = FnKeyState::Idle;
             let _ = ctx.app_handle.emit("hotkey-tap", "fn-tap");
         }
@@ -260,6 +281,7 @@ pub fn start_fn_key_listener(app: AppHandle) {
             last_event_ms: AtomicU64::new(0),
             app_handle: app,
             tap_ref: Mutex::new(None),
+            timer_cancelled: AtomicBool::new(false),
         });
 
         // 設定全域 context（OnceLock 只設定一次）

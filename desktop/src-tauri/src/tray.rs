@@ -30,8 +30,15 @@ pub fn setup_tray(app: &mut App) -> tauri::Result<()> {
             } => {
                 let app = tray.app_handle();
                 if let Some(win) = app.get_webview_window("main") {
-                    let _ = win.show();
-                    let _ = win.set_focus();
+                    // H3 修復：添加錯誤處理和日誌
+                    if let Err(e) = win.show() {
+                        eprintln!("[tray] Failed to show window: {}", e);
+                    }
+                    if let Err(e) = win.set_focus() {
+                        eprintln!("[tray] Failed to focus window: {}", e);
+                    }
+                } else {
+                    eprintln!("[tray] Main window not found");
                 }
             }
             _ => {}
@@ -40,15 +47,31 @@ pub fn setup_tray(app: &mut App) -> tauri::Result<()> {
             "quit" => app.exit(0),
             "show" => {
                 if let Some(win) = app.get_webview_window("main") {
-                    let _ = win.show();
-                    let _ = win.set_focus();
+                    // H3 修復：添加錯誤處理和日誌
+                    if let Err(e) = win.show() {
+                        eprintln!("[tray] Failed to show window: {}", e);
+                    }
+                    if let Err(e) = win.set_focus() {
+                        eprintln!("[tray] Failed to focus window: {}", e);
+                    }
+                } else {
+                    eprintln!("[tray] Main window not found");
                 }
             }
             "settings" => {
                 if let Some(win) = app.get_webview_window("main") {
-                    let _ = win.show();
-                    let _ = win.set_focus();
-                    let _ = win.emit("navigate", "/settings");
+                    // H3 修復：添加錯誤處理和日誌
+                    if let Err(e) = win.show() {
+                        eprintln!("[tray] Failed to show window: {}", e);
+                    }
+                    if let Err(e) = win.set_focus() {
+                        eprintln!("[tray] Failed to focus window: {}", e);
+                    }
+                    if let Err(e) = win.emit("navigate", "/settings") {
+                        eprintln!("[tray] Failed to emit navigate event: {}", e);
+                    }
+                } else {
+                    eprintln!("[tray] Main window not found");
                 }
             }
             _ => {}

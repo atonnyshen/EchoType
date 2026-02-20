@@ -71,25 +71,50 @@ export default function Hub() {
 
   const groupedHistory = groupByDate(filtered);
 
-  // 統計數據：每日使用量
+  // 統計數據：從歷史記錄計算真實數據
   const getStatsOption = () => {
-    // 模擬數據
-    const dates = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-    const values = [5, 12, 8, 15, 20, 8, 10]; // Words count or entries
-    
+    // 計算過去7天的數據
+    const now = new Date();
+    const dates = [];
+    const values = [];
+
+    for (let i = 6; i >= 0; i--) {
+      const date = new Date(now);
+      date.setDate(date.getDate() - i);
+      const dayName = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][date.getDay()];
+      dates.push(dayName);
+
+      // 計算該天的字數
+      const dayStart = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+      const dayEnd = new Date(dayStart);
+      dayEnd.setDate(dayEnd.getDate() + 1);
+
+      const dayEntries = history.filter(e => {
+        const entryDate = new Date(e.created_at);
+        return entryDate >= dayStart && entryDate < dayEnd;
+      });
+
+      const wordCount = dayEntries.reduce((sum, e) => {
+        const text = e.polished_text ?? e.transcript;
+        return sum + text.length;
+      }, 0);
+
+      values.push(wordCount);
+    }
+
     return {
       tooltip: { trigger: 'axis' },
       grid: { top: 30, right: 20, bottom: 20, left: 40, containLabel: true },
       xAxis: {
         type: 'category',
         data: dates,
-        axisLine: { lineStyle: { color: 'rgba(255,255,255,0.3)' } },
-        axisLabel: { color: 'rgba(255,255,255,0.6)' }
+        axisLine: { lineStyle: { color: 'rgba(0,0,0,0.1)' } },
+        axisLabel: { color: 'rgba(0,0,0,0.5)' }
       },
       yAxis: {
         type: 'value',
-        splitLine: { lineStyle: { color: 'rgba(255,255,255,0.1)' } },
-        axisLabel: { color: 'rgba(255,255,255,0.6)' }
+        splitLine: { lineStyle: { color: 'rgba(0,0,0,0.06)' } },
+        axisLabel: { color: 'rgba(0,0,0,0.5)' }
       },
       series: [
         {
@@ -100,8 +125,8 @@ export default function Hub() {
               type: 'linear',
               x: 0, y: 0, x2: 0, y2: 1,
               colorStops: [
-                { offset: 0, color: '#8b5cf6' },
-                { offset: 1, color: '#6366f1' }
+                { offset: 0, color: '#5856d6' },
+                { offset: 1, color: '#007aff' }
               ]
             },
             borderRadius: [4, 4, 0, 0]
@@ -112,6 +137,12 @@ export default function Hub() {
       backgroundColor: 'transparent'
     };
   };
+
+  // 計算統計數據
+  const totalChars = history.reduce((sum, e) => sum + (e.polished_text ?? e.transcript).length, 0);
+  const totalEntries = history.length;
+  // 假設平均打字速度 40 字/分鐘，語音輸入節省 70% 時間
+  const savedMinutes = Math.round((totalChars / 40) * 0.7);
 
   return (
     <div className="hub-root">
@@ -194,15 +225,15 @@ export default function Hub() {
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 20, marginTop: 20 }}>
                 <div className="glass-card" style={{ padding: 20, textAlign: "center" }}>
-                    <div style={{ fontSize: 32, fontWeight: 700, color: "#6366f1" }}>1,204</div>
+                    <div style={{ fontSize: 32, fontWeight: 700, color: "#007aff" }}>{totalChars.toLocaleString()}</div>
                     <div style={{ fontSize: 13, color: "var(--color-text-muted)" }}>總字數</div>
                 </div>
                 <div className="glass-card" style={{ padding: 20, textAlign: "center" }}>
-                    <div style={{ fontSize: 32, fontWeight: 700, color: "#10b981" }}>15m</div>
+                    <div style={{ fontSize: 32, fontWeight: 700, color: "#34c759" }}>{savedMinutes}m</div>
                     <div style={{ fontSize: 13, color: "var(--color-text-muted)" }}>節省時間</div>
                 </div>
                 <div className="glass-card" style={{ padding: 20, textAlign: "center" }}>
-                    <div style={{ fontSize: 32, fontWeight: 700, color: "#f43f5e" }}>42</div>
+                    <div style={{ fontSize: 32, fontWeight: 700, color: "#ff3b30" }}>{totalEntries}</div>
                     <div style={{ fontSize: 13, color: "var(--color-text-muted)" }}>錄音次數</div>
                 </div>
             </div>

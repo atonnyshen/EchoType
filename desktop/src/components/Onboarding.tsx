@@ -45,7 +45,7 @@ function OnboardingPrivacy({ onNext }: { onNext: () => void }) {
       <div className="onboarding-icon">🔒</div>
       <h1>隱私承諾</h1>
       <p className="onboarding-desc">EchoType 的核心理念是隱私。</p>
-      <ul style={{ textAlign: "left", display: "inline-block", margin: "12px 0", lineHeight: 1.8, fontSize: 15, color: "var(--color-text-muted)" }}>
+      <ul style={{ textAlign: "left", display: "inline-block", margin: "12px 0", lineHeight: 1.8, fontSize: 15, color: "var(--color-text-secondary)" }}>
         <li>✓ 語音在裝置端處理，不上傳雲端</li>
         <li>✓ 只有必要的上下文（如視窗標題）會被讀取</li>
         <li>✓ 歷史記錄僅儲存在本機</li>
@@ -326,6 +326,7 @@ export default function Onboarding() {
 
   const handleSkip = () => setStep((s) => Math.min(s + 1, TOTAL_STEPS - 1));
   const handleNext = () => setStep((s) => Math.min(s + 1, TOTAL_STEPS - 1));
+  const handleBack = () => setStep((s) => Math.max(s - 1, 0));
 
   return (
     <div className="onboarding-root">
@@ -335,6 +336,28 @@ export default function Onboarding() {
           className="progress-fill"
           style={{ width: `${((step + 1) / TOTAL_STEPS) * 100}%` }}
         />
+      </div>
+
+      {/* 返回按鈕 */}
+      {step > 0 && step < TOTAL_STEPS - 1 && (
+        <button
+          className="btn btn-ghost"
+          onClick={handleBack}
+          style={{
+            position: "fixed",
+            top: 20,
+            left: 20,
+            padding: "8px 16px",
+            fontSize: 14,
+          }}
+        >
+          ← 返回
+        </button>
+      )}
+
+      {/* 步驟指示 */}
+      <div style={{ position: "fixed", top: 22, right: 24, fontSize: 13, color: "var(--color-text-muted)" }}>
+        {step + 1} / {TOTAL_STEPS}
       </div>
 
       <AnimatePresence mode="wait">
@@ -363,7 +386,7 @@ export default function Onboarding() {
           align-items: center;
           justify-content: center;
           text-align: center;
-          background: radial-gradient(circle at center, #1e1e24 0%, #0d0d0f 100%);
+          background: var(--color-bg);
           padding: 40px 24px;
         }
         .step-content {
@@ -373,18 +396,18 @@ export default function Onboarding() {
           gap: 16px;
           width: 100%;
         }
-        h1 { font-size: 28px; font-weight: 700; margin: 0; }
+        h1 { font-size: 28px; font-weight: 700; margin: 0; color: var(--color-text); }
         .progress-bar {
           position: fixed;
           top: 0;
           left: 0;
           width: 100%;
           height: 4px;
-          background: rgba(255,255,255,0.1);
+          background: rgba(0,0,0,0.06);
         }
         .progress-fill {
           height: 100%;
-          background: var(--gradient-accent);
+          background: var(--color-accent);
           transition: width 0.4s ease;
         }
       `}</style>

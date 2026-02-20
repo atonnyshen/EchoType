@@ -2,6 +2,8 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
+import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
+import { currentMonitor, PhysicalPosition } from "@tauri-apps/api/window";
 import { motion, AnimatePresence } from "framer-motion";
 import "./FloatingBar.css";
 
@@ -12,6 +14,35 @@ interface RecordingResult {
   polished_text: string;
   duration_seconds: number;
   asr_engine: string;
+}
+
+const appWindow = getCurrentWebviewWindow();
+
+/** 顯示浮動條並置中於螢幕底部偏上 */
+async function showFloatingBar() {
+  try {
+    const monitor = await currentMonitor();
+    if (monitor) {
+      const screenW = monitor.size.width;
+      const winW = 360;
+      const x = Math.round((screenW - winW) / 2);
+      const y = Math.round(monitor.size.height * 0.82); // 螢幕 82% 高度處（接近底部）
+      await appWindow.setPosition(new PhysicalPosition(x, y));
+    }
+    await appWindow.show();
+    await appWindow.setFocus();
+  } catch (e) {
+    console.error("Show floating bar failed:", e);
+  }
+}
+
+/** 隱藏浮動條 */
+async function hideFloatingBar() {
+  try {
+    await appWindow.hide();
+  } catch (e) {
+    console.error("Hide floating bar failed:", e);
+  }
 }
 
 export default function FloatingBar() {
@@ -31,6 +62,9 @@ export default function FloatingBar() {
     setState("recording");
     setDuration(0);
     setResult(null);
+
+    // 顯示浮動條
+    await showFloatingBar();
 
     // 播放開始音效
     new Audio("/sounds/Tink.aiff").play().catch(console.error);
@@ -53,6 +87,7 @@ export default function FloatingBar() {
     if (waveRef.current) clearInterval(waveRef.current);
     setWaveHeights(Array(12).fill(4));
     setState("idle");
+    hideFloatingBar();
 
     // Stop backend recording to prevent AudioManager from staying in recording state
     invoke("stop_recording").catch(() => {
@@ -79,8 +114,8 @@ export default function FloatingBar() {
       // 自動注入文字
       try {
         await invoke("inject_text", { text: res.polished_text });
-        // 注入成功，2 秒後回到 idle
-        setTimeout(() => setState("idle"), 2000);
+        // 注入成功，2 秒後隱藏
+        setTimeout(() => { setState("idle"); hideFloatingBar(); }, 2000);
       } catch (injectError) {
         // 注入失敗會由 inject-failed 事件處理，這裡不做額外處理
         console.error("Inject failed:", injectError);
@@ -88,6 +123,7 @@ export default function FloatingBar() {
     } catch (e) {
       console.error("Recording failed:", e);
       setState("idle");
+      hideFloatingBar();
     }
   }, []);
 
@@ -96,7 +132,7 @@ export default function FloatingBar() {
     try {
       await writeText(result.polished_text);
       setState("done"); // 切換到成功狀態
-      setTimeout(() => setState("idle"), 1500);
+      setTimeout(() => { setState("idle"); hideFloatingBar(); }, 1500);
     } catch (e) {
       console.error("Copy failed:", e);
     }
@@ -140,7 +176,11 @@ export default function FloatingBar() {
       listen("hotkey-cancelled", () => {
         if (stateRef.current === "recording") {
           handleCancelRecording();
-          new Audio("/sounds/Basso.aiff").play().catch(console.error);
+          // H9 修復：添加音訊播放錯誤處理
+          new Audio("/sounds/Basso.aiff").play().catch((err) => {
+            console.error("Failed to play cancel sound:", err);
+            // 靜默失敗，不影響用戶體驗
+          });
         }
       })
     );
@@ -156,7 +196,9 @@ export default function FloatingBar() {
             await invoke("inject_text", { text });
           } else {
             // 無歷史記錄，播放提示音
-            new Audio("/sounds/Basso.aiff").play().catch(console.error);
+            new Audio("/sounds/Basso.aiff").play().catch((err) => {
+              console.error("Failed to play error sound:", err);
+            });
           }
         } catch (e) {
           console.error("Paste last transcript failed:", e);
@@ -165,7 +207,10 @@ export default function FloatingBar() {
     );
 
     return () => {
-      listeners.forEach((p) => p.then((f) => f()));
+      // 正確清理：等待所有 Promise resolve 後再調用 unlisten
+      Promise.all(listeners).then((unlisteners) => {
+        unlisteners.forEach((unlisten) => unlisten());
+      });
     };
   }, [handleStartRecording, handleStopRecording, handleCancelRecording]);
 
@@ -194,19 +239,6 @@ export default function FloatingBar() {
   return (
     <div className="floating-bar-root">
       <AnimatePresence mode="wait">
-        {state === "idle" && (
-          <motion.div
-            key="idle"
-            className="floating-bar idle"
-            initial={{ opacity: 0, scale: 0.9 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.9 }}
-          >
-            <span className="dot idle-dot" />
-            <span className="hint-text">按下快捷鍵開始錄音</span>
-          </motion.div>
-        )}
-
         {state === "recording" && (
           <motion.div
             key="recording"

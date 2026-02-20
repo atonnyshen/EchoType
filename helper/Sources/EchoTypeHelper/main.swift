@@ -244,11 +244,23 @@ func dispatch(cmd: String, args: [String: Any]) async {
         }
 
     case "check_model_status":
-        let whisperDownloaded = await modelDownloader.isWhisperDownloaded()
-        let qwen3Downloaded = await modelDownloader.isQwen3Downloaded()
+        let whisperInfo = await modelDownloader.getWhisperModelInfo()
+        let qwen3Info = await modelDownloader.getQwen3ModelInfo()
         respond([
-            "whisper_downloaded": whisperDownloaded,
-            "qwen3_downloaded": qwen3Downloaded
+            "whisper": [
+                "name": whisperInfo.name,
+                "path": whisperInfo.path,
+                "downloaded": whisperInfo.isDownloaded,
+                "size": whisperInfo.size as Any,
+                "source": whisperInfo.source
+            ],
+            "qwen3": [
+                "name": qwen3Info.name,
+                "path": qwen3Info.path,
+                "downloaded": qwen3Info.isDownloaded,
+                "size": qwen3Info.size as Any,
+                "source": qwen3Info.source
+            ]
         ])
 
     case "download_model":
@@ -258,11 +270,12 @@ func dispatch(cmd: String, args: [String: Any]) async {
         }
         do {
             if modelType == "whisper" {
-                let _ = try await modelDownloader.downloadWhisper { progress in
-                    // Progress logging to stderr to avoid corrupting stdout IPC
-                    fputs("Whisper download progress: \(Int(progress * 100))%\n", stderr)
-                }
-                respond(true)
+                // Whisper 由 WhisperKit 自動下載，首次 load() 時觸發
+                // 這裡只是預先觸發下載流程
+                respond([
+                    "status": "whisper_auto_download",
+                    "message": "Whisper 模型將在首次使用時自動下載"
+                ])
             } else if modelType == "qwen3" {
                 let _ = try await modelDownloader.downloadQwen3 { progress in
                     fputs("Qwen3 download progress: \(Int(progress * 100))%\n", stderr)

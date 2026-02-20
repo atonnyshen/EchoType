@@ -60,6 +60,8 @@ public enum ASREngineType: String, Sendable, CaseIterable {
 public enum ASRError: LocalizedError {
     case modelNotLoaded
     case modelNotFound(String)
+    case modelLoadFailed
+    case invalidModelFormat(String)
     case transcriptionFailed(String)
     case invalidAudioFormat
 
@@ -67,6 +69,8 @@ public enum ASRError: LocalizedError {
         switch self {
         case .modelNotLoaded:           return "ASR 模型尚未載入"
         case .modelNotFound(let path):  return "找不到模型: \(path)"
+        case .modelLoadFailed:          return "模型載入失敗"
+        case .invalidModelFormat(let msg): return "模型格式無效: \(msg)"
         case .transcriptionFailed(let msg): return "轉錄失敗: \(msg)"
         case .invalidAudioFormat:       return "不支援的音訊格式"
         }
